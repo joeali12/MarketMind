@@ -1,0 +1,86 @@
+{
+  "selected_k": 2,
+  "selection_rule": "Maximize training silhouette, then prefer larger min_cluster_size. k=2 wins on silhouette (see kmeans_diagnostics.csv). k=3 kept as sensitivity only \u2014 not forced for more personas.",
+  "comparisons": [
+    {
+      "k": 2,
+      "silhouette": 0.4245605398161847,
+      "inertia": 6619.218912598187,
+      "min_cluster_size": 1632,
+      "labels": {
+        "0": "Recent high-spend",
+        "1": "Lapsed low-spend"
+      },
+      "profiles": [
+        {
+          "cluster_id": 0,
+          "n_customers": 1632,
+          "recency_mean": 28.947916666666668,
+          "recency_median": 17.0,
+          "frequency_mean": 8.952205882352942,
+          "frequency_median": 6.0,
+          "monetary_mean": 4556.842922181373,
+          "monetary_median": 2170.19,
+          "share": 0.37812789620018533
+        },
+        {
+          "cluster_id": 1,
+          "n_customers": 2684,
+          "recency_mean": 128.20044709388972,
+          "recency_median": 89.0,
+          "frequency_mean": 1.742548435171386,
+          "frequency_median": 1.0,
+          "monetary_mean": 519.729685171386,
+          "monetary_median": 370.53999999999996,
+          "share": 0.6218721037998146
+        }
+      ]
+    },
+    {
+      "k": 3,
+      "silhouette": 0.3294352704122325,
+      "inertia": 4990.875101657514,
+      "min_cluster_size": 810,
+      "labels": {
+        "0": "Recent high-spend",
+        "1": "Lapsed low-spend",
+        "2": "Recent high-spend (2)"
+      },
+      "profiles": [
+        {
+          "cluster_id": 0,
+          "n_customers": 810,
+          "recency_mean": 15.48641975308642,
+          "recency_median": 9.0,
+          "frequency_mean": 13.422222222222222,
+          "frequency_median": 9.0,
+          "monetary_mean": 7290.042837037037,
+          "monetary_median": 3442.635,
+          "share": 0.1876737720111214
+        },
+        {
+          "cluster_id": 1,
+          "n_customers": 1745,
+          "recency_mean": 159.9862464183381,
+          "recency_median": 149.0,
+          "frequency_mean": 1.2951289398280803,
+          "frequency_median": 1.0,
+          "monetary_mean": 312.455376504298,
+          "monetary_median": 260.85,
+          "share": 0.4043095458758109
+        },
+        {
+          "cluster_id": 2,
+          "n_customers": 1761,
+          "recency_mean": 56.56615559341283,
+          "recency_median": 40.0,
+          "frequency_mean": 3.4951731970471323,
+          "frequency_median": 3.0,
+          "monetary_mean": 1352.3865951164112,
+          "monetary_median": 1013.13,
+          "share": 0.40801668211306763
+        }
+      ]
+    }
+  ]
+}

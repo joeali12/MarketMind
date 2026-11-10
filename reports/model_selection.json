@@ -1,0 +1,16 @@
+{
+  "selected_model": "gradient_boosting",
+  "selection_metric": "cv_mae",
+  "cv_mae_by_model": {
+    "mean_baseline": 389.58638895879614,
+    "ridge": 438.14911319823085,
+    "random_forest": 399.7169511748713,
+    "gradient_boosting": 362.31207860184014
+  },
+  "selected_params": {
+    "model__learning_rate": 0.05,
+    "model__max_depth": 2,
+    "model__n_estimators": 100
+  },
+  "test_untouched_until_here": true
+}

@@ -1,0 +1,7 @@
+step,reason,rows_before,rows_after,rows_removed
+start,Input frame,1067371,1067371,0
+parse_types,Coerce dtypes; add flags/line_amount,1067371,1067371,0
+drop_unparseable_dates,invoice_date could not be parsed,1067371,1067371,0
+drop_non_finite_qty_price,quantity or unit_price non-numeric/NaN after coerce,1067371,1067371,0
+drop_exact_duplicates,"Exact duplicates on ['invoice', 'stock_code', 'description', 'quantity', 'invoice_date', 'unit_price', 'customer_id', 'country']",1067371,1033036,34335
+drop_missing_customer_id,Customer-level modeling requires Customer ID,1033036,797885,235151

@@ -1,0 +1,8 @@
+{
+  "explained_variance_ratio": [
+    0.7440488617795505,
+    0.19628488207311953
+  ],
+  "explained_variance_ratio_sum": 0.9403337438526701,
+  "note": "PCA is for 2D visualization only; it does not validate cluster quality."
+}

@@ -1,0 +1,42 @@
+{
+  "n_cleaned_rows": 797885,
+  "n_eligible_rows": 779495,
+  "n_customers": 5942,
+  "date_min": "2009-12-01 07:45:00",
+  "date_max": "2011-12-09 12:50:00",
+  "uk_spend_share": 0.8281667347183493,
+  "cancellation_row_share": 0.023048434298175803,
+  "insights": [
+    {
+      "id": 1,
+      "claim": "Eligible transaction volume varies substantially by month across 2009\u20132011.",
+      "evidence": "figures/eda_monthly_volume.png",
+      "type": "observation"
+    },
+    {
+      "id": 2,
+      "claim": "Line spend is heavily right-skewed; a small share of lines dominate monetary value.",
+      "evidence": "figures/eda_line_amount_hist.png",
+      "type": "observation"
+    },
+    {
+      "id": 3,
+      "claim": "United Kingdom accounts for the large majority of eligible spend in this dataset.",
+      "evidence": "figures/eda_country_spend.png and uk_spend_share metric",
+      "type": "observation"
+    },
+    {
+      "id": 4,
+      "claim": "Cancellation-marked rows are a persistent minority of activity and must be handled explicitly in spend targets.",
+      "evidence": "figures/eda_cancel_rate.png and cancellation_row_share",
+      "type": "observation"
+    },
+    {
+      "id": 5,
+      "claim": "Quantity and unit price show extreme outliers; RFM monetary sums will be sensitive to these tails.",
+      "evidence": "figures/eda_qty_price_scatter.png and raw quality extremes",
+      "type": "hypothesis_for_modeling"
+    }
+  ],
+  "caveat": "Insights are descriptive associations from this historical dataset, not causal claims about marketing actions."
+}

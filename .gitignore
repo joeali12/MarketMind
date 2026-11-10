@@ -1,0 +1,71 @@
+# Virtual environments
+.venv/
+venv/
+env/
+.env/
+
+# Secrets and local env
+.env
+.env.*
+!.env.example
+*.pem
+secrets/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+notebooks/*.executed.ipynb
+*.egg
+
+# Data (raw and processed stay local)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+# Upload temp sessions (privacy)
+data/uploads/tmp/*
+!data/uploads/tmp/.gitkeep
+# Keep synthetic fixtures
+!data/fixtures/
+
+# Allow the small academic MVP artifacts needed for demo inference.
+# Do not add large experimental dumps here.
+artifacts/*
+!artifacts/.gitkeep
+!artifacts/segmentation_pipeline.joblib
+!artifacts/regression_pipeline.joblib
+!artifacts/model_metadata.json
+
+# Reports with generated figures (optional commit of small JSON later)
+reports/figures/*
+!reports/figures/.gitkeep
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Streamlit / Jupyter
+.streamlit/secrets.toml
+*.log
+
+# Next.js
+web/node_modules/
+web/.next/
+web/out/
+
+# Hugging Face / deploy caches
+.cache/
+testsprite_tests/tmp/
+testsprite_tests/tmp/config.json

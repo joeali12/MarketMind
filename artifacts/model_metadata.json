@@ -1,0 +1,187 @@
+{
+  "created_at_utc": "2026-11-06T16:48:41.838512+00:00",
+  "random_seed": 42,
+  "data": {
+    "cleaned_rows": 797885,
+    "date_min": "2009-12-01 07:45:00",
+    "date_max": "2011-12-09 12:50:00",
+    "train_customers": 4316,
+    "test_customers": 5283
+  },
+  "lookback_days": null,
+  "train_cutoffs": [
+    "2010-12-11"
+  ],
+  "test_cutoff": "2011-09-10",
+  "cutoff_rationale": "Full-history lookback; test cutoff = max_date - 90d; train cutoff ~273 days earlier so train labels end before test cutoff.",
+  "target_window_days": 90,
+  "n_clusters": 2,
+  "segment_label_map": {
+    "0": "Recent high-spend",
+    "1": "Lapsed low-spend"
+  },
+  "segment_action_map": {
+    "0": "Consider retention / thank-you offers for recent high spenders (heuristic only).",
+    "1": "Consider cautious re-engagement; expected spend may be low (heuristic only)."
+  },
+  "actions_approved": false,
+  "selected_regression_model": "gradient_boosting",
+  "selected_params": {
+    "model__learning_rate": 0.05,
+    "model__max_depth": 2,
+    "model__n_estimators": 100
+  },
+  "cv_mae_by_model": {
+    "mean_baseline": 389.58638895879614,
+    "ridge": 438.14911319823085,
+    "random_forest": 399.7169511748713,
+    "gradient_boosting": 362.31207860184014
+  },
+  "test_metrics": {
+    "mae": 452.1043604769556,
+    "rmse": 2650.9479236140055,
+    "r2": 0.347425626856006
+  },
+  "baseline_test_metrics": {
+    "mae": 609.2582121404853,
+    "rmse": 3290.6948686622977,
+    "r2": -0.005548100963638669
+  },
+  "currency_label": "GBP (\u00a3)",
+  "currency_confirmed": true,
+  "feature_order": [
+    "recency",
+    "frequency",
+    "monetary"
+  ],
+  "sklearn_version": "1.9.1",
+  "numpy_version": "2.5.4",
+  "pandas_version": "3.1.1",
+  "hierarchical_comparison": {
+    "algorithm": "AgglomerativeClustering",
+    "linkage": "ward",
+    "n_clusters": 2,
+    "n_rows_used": 4316,
+    "sampled": false,
+    "sample_size_cap": 5000,
+    "silhouette": 0.418262253020809,
+    "cluster_sizes": {
+      "0": 3024,
+      "1": 1292
+    }
+  },
+  "pca": {
+    "explained_variance_ratio": [
+      0.7440488617795505,
+      0.19628488207311953
+    ],
+    "explained_variance_ratio_sum": 0.9403337438526701,
+    "note": "PCA is for 2D visualization only; it does not validate cluster quality."
+  },
+  "k_selection": {
+    "selected_k": 2,
+    "selection_rule": "Maximize training silhouette, then prefer larger min_cluster_size. k=2 wins on silhouette (see kmeans_diagnostics.csv). k=3 kept as sensitivity only \u2014 not forced for more personas.",
+    "comparisons": [
+      {
+        "k": 2,
+        "silhouette": 0.4245605398161847,
+        "inertia": 6619.218912598187,
+        "min_cluster_size": 1632,
+        "labels": {
+          "0": "Recent high-spend",
+          "1": "Lapsed low-spend"
+        },
+        "profiles": [
+          {
+            "cluster_id": 0,
+            "n_customers": 1632,
+            "recency_mean": 28.947916666666668,
+            "recency_median": 17.0,
+            "frequency_mean": 8.952205882352942,
+            "frequency_median": 6.0,
+            "monetary_mean": 4556.842922181373,
+            "monetary_median": 2170.19,
+            "share": 0.37812789620018533
+          },
+          {
+            "cluster_id": 1,
+            "n_customers": 2684,
+            "recency_mean": 128.20044709388972,
+            "recency_median": 89.0,
+            "frequency_mean": 1.742548435171386,
+            "frequency_median": 1.0,
+            "monetary_mean": 519.729685171386,
+            "monetary_median": 370.53999999999996,
+            "share": 0.6218721037998146
+          }
+        ]
+      },
+      {
+        "k": 3,
+        "silhouette": 0.3294352704122325,
+        "inertia": 4990.875101657514,
+        "min_cluster_size": 810,
+        "labels": {
+          "0": "Recent high-spend",
+          "1": "Lapsed low-spend",
+          "2": "Recent high-spend (2)"
+        },
+        "profiles": [
+          {
+            "cluster_id": 0,
+            "n_customers": 810,
+            "recency_mean": 15.48641975308642,
+            "recency_median": 9.0,
+            "frequency_mean": 13.422222222222222,
+            "frequency_median": 9.0,
+            "monetary_mean": 7290.042837037037,
+            "monetary_median": 3442.635,
+            "share": 0.1876737720111214
+          },
+          {
+            "cluster_id": 1,
+            "n_customers": 1745,
+            "recency_mean": 159.9862464183381,
+            "recency_median": 149.0,
+            "frequency_mean": 1.2951289398280803,
+            "frequency_median": 1.0,
+            "monetary_mean": 312.455376504298,
+            "monetary_median": 260.85,
+            "share": 0.4043095458758109
+          },
+          {
+            "cluster_id": 2,
+            "n_customers": 1761,
+            "recency_mean": 56.56615559341283,
+            "recency_median": 40.0,
+            "frequency_mean": 3.4951731970471323,
+            "frequency_median": 3.0,
+            "monetary_mean": 1352.3865951164112,
+            "monetary_median": 1013.13,
+            "share": 0.40801668211306763
+          }
+        ]
+      }
+    ]
+  },
+  "eligible_spend_policy": "Exclude cancellation invoices (Invoice starting with C); require quantity > 0 and unit_price >= 0. Target is eligible positive spend, not net revenue after refunds. (D5 resolved).",
+  "rfm_definitions": {
+    "recency": "Days between cutoff and most recent eligible purchase (lower = more recent).",
+    "frequency": "Count of distinct eligible invoices in the observation window.",
+    "monetary": "Sum of eligible line_amount (quantity * unit_price) in the observation window.",
+    "lookback": "Full history on/before cutoff (lookback_days=null)."
+  },
+  "notes": [
+    "Segment names are descriptive labels from RFM profile medians; not approved personas.",
+    "Segment actions are provisional heuristics only (D7); actions_approved=false \u2014 not approved business policy.",
+    "Eligible-spend policy (D5): cancellations starting with C and non-positive quantities excluded; target is eligible positive spend, not net revenue after refunds.",
+    "Currency (D6): GBP (\u00a3) per UCI dataset description; no FX conversion; currency_confirmed=true.",
+    "Deployment (D1/D8): preferred host Streamlit Community Cloud; public publish not approved.",
+    "Do not load these joblib files from untrusted sources."
+  ],
+  "deployment": {
+    "preferred_host": "streamlit_community_cloud",
+    "public_publish_approved": false,
+    "note": "D1 preference set; D8 publish not approved \u2014 do not deploy externally."
+  }
+}

@@ -1,0 +1,70 @@
+[server]
+headless = true
+enableStaticServing = true
+
+[browser]
+gatherUsageStats = false
+
+# Self-hosted Arabic display font (bold headings / short labels only)
+[[theme.fontFaces]]
+family = "EYENAmmon"
+url = "app/static/fonts/EYENAmmon-Bold.ttf"
+weight = 700
+
+[theme]
+base = "light"
+# Body uses system / sans-serif; Arabic headings apply EYENAmmon via scoped CSS when RTL.
+font = "sans-serif"
+headingFont = "sans-serif"
+codeFont = "monospace"
+primaryColor = "#0F5B5A"
+baseRadius = "large"
+baseFontSize = 16
+baseFontWeight = 400
+metricValueFontSize = "1.5rem"
+metricValueFontWeight = 600
+headingFontSizes = ["2rem", "1.45rem", "1.2rem", "1.05rem", "1rem", "0.95rem"]
+headingFontWeights = [600, 600, 600, 600, 600, 600]
+showWidgetBorder = true
+showSidebarBorder = true
+linkUnderline = false
+paddingTop = "1.5rem"
+paddingBottom = "3rem"
+
+[theme.light]
+backgroundColor = "#F6F8F7"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#13243A"
+linkColor = "#0F5B5A"
+borderColor = "#D8DEE6"
+primaryColor = "#0F5B5A"
+chartCategoricalColors = ["#0F5B5A", "#13243A", "#16835D", "#667085", "#C59A3B"]
+dataframeHeaderBackgroundColor = "#EEF2F1"
+dataframeHeaderTextColor = "#13243A"
+dataframeBorderColor = "#D8DEE6"
+
+[theme.light.sidebar]
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F6F8F7"
+textColor = "#13243A"
+primaryColor = "#0F5B5A"
+borderColor = "#D8DEE6"
+
+[theme.dark]
+primaryColor = "#2A9A8F"
+backgroundColor = "#0D1520"
+secondaryBackgroundColor = "#152033"
+textColor = "#E8EEF7"
+linkColor = "#5EC4B8"
+borderColor = "#2A3A50"
+chartCategoricalColors = ["#2A9A8F", "#8BA3C7", "#3DAB7E", "#98A2B3", "#C59A3B"]
+dataframeHeaderBackgroundColor = "#1A2740"
+dataframeHeaderTextColor = "#E8EEF7"
+dataframeBorderColor = "#2A3A50"
+
+[theme.dark.sidebar]
+backgroundColor = "#101A2C"
+secondaryBackgroundColor = "#152033"
+textColor = "#E8EEF7"
+primaryColor = "#2A9A8F"
+borderColor = "#2A3A50"
