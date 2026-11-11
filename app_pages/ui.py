@@ -93,6 +93,15 @@ h1, h2, h3,
 {font_link}
 <style>
 {type_css}
+[data-testid="stSidebar"] {{ display: none; }}
+[data-testid="stToolbar"] {{ display: none; }}
+[data-testid="stDecoration"] {{ display: none; }}
+header[data-testid="stHeader"] {{
+  background: #f8f9ff;
+}}
+.stApp {{
+  background: #f8f9ff;
+}}
 /* Calm surfaces — no gradients / neon */
 [data-testid="stMetric"] {{
   background: #FFFFFF;

@@ -81,18 +81,18 @@ def test_apptest_home_both_languages_and_nav():
     at.run()
     assert not at.exception, at.exception
     titles = [x.value for x in at.title]
-    assert any("اعرف" in str(v) or "زباين" in str(v) for v in titles) or titles
+    assert any("لوحة" in str(v) or "تحليل" in str(v) for v in titles) or titles
 
     at.session_state[LANG_KEY] = "en"
     at.run()
     assert not at.exception, at.exception
     titles_en = [str(x.value) for x in at.title]
-    assert any("Know" in v or "customer" in v.lower() for v in titles_en)
+    assert any("Store" in v or "overview" in v.lower() for v in titles_en)
 
     for page in [
+        "app_pages/products.py",
         "app_pages/segments.py",
         "app_pages/customer_lookup.py",
-        "app_pages/overview.py",
         "app_pages/data_validation.py",
         "app_pages/model_quality.py",
     ]:

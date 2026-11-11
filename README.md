@@ -18,11 +18,18 @@ cd web && npm install && npm run dev
 
 Open http://127.0.0.1:3000 (or `npm run dev -- -p 3001` if busy).
 
-Legacy Streamlit (regression only): `streamlit run app.py`.
+The PDF app is Streamlit: `streamlit run app.py` from the repo root. That file is the Community Cloud entrypoint.
 
-## Live / public deploy
+## Streamlit Community Cloud (PDF app)
 
-**Not published.** Public deployment is **not approved** (D8). See `docs/deployment.md`.
+**Approved, not live.** Public deploy of the Streamlit app was approved on 2026-11-11 (D8). No `streamlit.app` URL exists yet.
+
+1. Repository: `https://github.com/joeali12/MarketMind`
+2. Branch: `main`
+3. Main file path: `app.py`
+4. Python 3.12 (`runtime.txt`). Leave secrets empty. Do not add `.env`.
+
+See `docs/deployment.md`. Record a URL here only after that URL opens and its pages are checked.
 
 ## Screenshot
 
@@ -32,7 +39,7 @@ _Captured from the local Streamlit demo. Replace/update after UI changes._
 
 ## Data source
 
-Chen, D. (2012). Online Retail II [Dataset]. UCI Machine Learning Repository. https://doi.org/10.24432/C5CG6D  
+Chen, D. (2012). Online Retail II [Dataset]. UCI Machine Learning Repository. https://doi.org/10.24432/C5CG6D
 UCI page: https://archive.ics.uci.edu/dataset/502/online+retail+ii
 
 Raw data is **not** committed. Download locally:
@@ -107,8 +114,8 @@ Source: `artifacts/model_metadata.json`.
 
 Units: **eligible positive spend** over 90 days in **GBP (£)** (UCI dataset description; no FX conversion). Target excludes cancellation invoices starting with `C` and non-positive quantities — not net revenue after refunds (D5). Selection used training CV MAE only; test evaluated once. **R² is not an accuracy percentage.**
 
-**Cutoffs:** train 2010-12-11 · test 2011-09-10 · lookback = full history on/before cutoff.  
-**Scale:** source 1,067,371 rows → cleaned 797,885 · train customers 4,316 · test 5,283.  
+**Cutoffs:** train 2010-12-11 · test 2011-09-10 · lookback = full history on/before cutoff.
+**Scale:** source 1,067,371 rows → cleaned 797,885 · train customers 4,316 · test 5,283.
 **Segments:** K-Means **k=2** (train silhouette 0.425 vs k=3 at 0.329). Labels from profiles: *Recent high-spend* / *Lapsed low-spend*. Hierarchical ward silhouette ≈ 0.418 at k=2. k=3 retained as sensitivity only (`reports/k_sensitivity.json`).
 
 ## App
@@ -123,15 +130,15 @@ Units: **eligible positive spend** over 90 days in **GBP (£)** (UCI dataset des
 - High zero-target rates in the 90-day window
 - Target is eligible positive spend (D5), not net revenue after refunds
 - Currency GBP (£) from UCI description; no FX conversion (D6)
-- Not a commercial multi-tenant SaaS; not publicly deployed (D8)
+- Not a commercial multi-tenant SaaS. Streamlit Community Cloud is approved and not live yet (D8)
 
 ## Docs
 
-- `docs/model_card.md` — model card  
-- `docs/open_decisions_register.md` — TBD register  
-- `docs/presentation_outline.md` — slide outline (unpublished)  
-- `docs/linkedin_cv_draft.md` — drafts (do not post without approval)  
-- `docs/deployment.md` — Cloud / HF Spaces prep without publishing  
+- `docs/model_card.md` — model card
+- `docs/open_decisions_register.md` — TBD register
+- `docs/presentation_outline.md` — slide outline (unpublished)
+- `docs/linkedin_cv_draft.md` — drafts (do not post without approval)
+- `docs/deployment.md` — Cloud / HF Spaces prep without publishing
 
 ## License
 

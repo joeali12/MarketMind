@@ -85,3 +85,12 @@ def try_artifacts():
     except ArtifactError as exc:
         show_artifact_error(exc)
         return None
+
+
+@st.cache_data
+def load_store_snapshot() -> dict:
+    """Small demo-store figures. Does not read the raw UCI workbook."""
+    path = REPORTS_DIR / "demo_store_snapshot.json"
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text())

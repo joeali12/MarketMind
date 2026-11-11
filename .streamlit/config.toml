@@ -5,7 +5,9 @@ enableStaticServing = true
 [browser]
 gatherUsageStats = false
 
-# Self-hosted Arabic display font (bold headings / short labels only)
+# Self-hosted Arabic display font (bold headings / short labels only).
+# `url` is Streamlit's static URL. The file on disk is static/fonts/EYENAmmon-Bold.ttf
+# (served at /app/static/...). CSS falls back to Noto Sans Arabic, then sans-serif.
 [[theme.fontFaces]]
 family = "EYENAmmon"
 url = "app/static/fonts/EYENAmmon-Bold.ttf"
@@ -17,7 +19,7 @@ base = "light"
 font = "sans-serif"
 headingFont = "sans-serif"
 codeFont = "monospace"
-primaryColor = "#0F5B5A"
+primaryColor = "#3525CD"
 baseRadius = "large"
 baseFontSize = 16
 baseFontWeight = 400
@@ -32,12 +34,12 @@ paddingTop = "1.5rem"
 paddingBottom = "3rem"
 
 [theme.light]
-backgroundColor = "#F6F8F7"
+backgroundColor = "#F8F9FF"
 secondaryBackgroundColor = "#FFFFFF"
-textColor = "#13243A"
-linkColor = "#0F5B5A"
-borderColor = "#D8DEE6"
-primaryColor = "#0F5B5A"
+textColor = "#0B1C30"
+linkColor = "#3525CD"
+borderColor = "#C7C4D8"
+primaryColor = "#3525CD"
 chartCategoricalColors = ["#0F5B5A", "#13243A", "#16835D", "#667085", "#C59A3B"]
 dataframeHeaderBackgroundColor = "#EEF2F1"
 dataframeHeaderTextColor = "#13243A"

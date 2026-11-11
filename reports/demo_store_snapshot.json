@@ -1,0 +1,226 @@
+{
+  "source": "Derived from local transactions_cleaned.parquet. Demo UK sample, GBP, no FX.",
+  "metrics": {
+    "sales_gbp": 17374804.27,
+    "orders": 36975,
+    "customers": 5881,
+    "average_order_value_gbp": 469.91,
+    "returning_customer_share": 0.7235,
+    "eligible_rows": 779495,
+    "date_min": "2009-12-01 07:45:00",
+    "date_max": "2011-12-09 12:50:00"
+  },
+  "monthly_trend": [
+    {
+      "month": "2009-12",
+      "spend_gbp": 683504.01,
+      "orders": 1512
+    },
+    {
+      "month": "2010-01",
+      "spend_gbp": 555802.67,
+      "orders": 1011
+    },
+    {
+      "month": "2010-02",
+      "spend_gbp": 504558.96,
+      "orders": 1106
+    },
+    {
+      "month": "2010-03",
+      "spend_gbp": 696978.47,
+      "orders": 1524
+    },
+    {
+      "month": "2010-04",
+      "spend_gbp": 591982.0,
+      "orders": 1329
+    },
+    {
+      "month": "2010-05",
+      "spend_gbp": 597833.38,
+      "orders": 1377
+    },
+    {
+      "month": "2010-06",
+      "spend_gbp": 636371.13,
+      "orders": 1497
+    },
+    {
+      "month": "2010-07",
+      "spend_gbp": 589736.17,
+      "orders": 1381
+    },
+    {
+      "month": "2010-08",
+      "spend_gbp": 602224.6,
+      "orders": 1293
+    },
+    {
+      "month": "2010-09",
+      "spend_gbp": 829013.95,
+      "orders": 1689
+    },
+    {
+      "month": "2010-10",
+      "spend_gbp": 1033112.01,
+      "orders": 2133
+    },
+    {
+      "month": "2010-11",
+      "spend_gbp": 1166460.02,
+      "orders": 2587
+    },
+    {
+      "month": "2010-12",
+      "spend_gbp": 570422.73,
+      "orders": 1400
+    },
+    {
+      "month": "2011-01",
+      "spend_gbp": 568101.31,
+      "orders": 987
+    },
+    {
+      "month": "2011-02",
+      "spend_gbp": 446084.92,
+      "orders": 998
+    },
+    {
+      "month": "2011-03",
+      "spend_gbp": 594081.76,
+      "orders": 1321
+    },
+    {
+      "month": "2011-04",
+      "spend_gbp": 468374.33,
+      "orders": 1149
+    },
+    {
+      "month": "2011-05",
+      "spend_gbp": 677355.15,
+      "orders": 1555
+    },
+    {
+      "month": "2011-06",
+      "spend_gbp": 660046.05,
+      "orders": 1393
+    },
+    {
+      "month": "2011-07",
+      "spend_gbp": 598962.9,
+      "orders": 1331
+    },
+    {
+      "month": "2011-08",
+      "spend_gbp": 644051.04,
+      "orders": 1281
+    },
+    {
+      "month": "2011-09",
+      "spend_gbp": 950690.2,
+      "orders": 1756
+    },
+    {
+      "month": "2011-10",
+      "spend_gbp": 1035642.45,
+      "orders": 1929
+    },
+    {
+      "month": "2011-11",
+      "spend_gbp": 1156205.61,
+      "orders": 2658
+    },
+    {
+      "month": "2011-12",
+      "spend_gbp": 517208.44,
+      "orders": 778
+    }
+  ],
+  "products": [
+    {
+      "stock_code": "22423",
+      "description": "REGENCY CAKESTAND 3 TIER",
+      "quantity": 24139.0,
+      "spend_gbp": 277656.25,
+      "orders": 3318
+    },
+    {
+      "stock_code": "85123A",
+      "description": "WHITE HANGING HEART T-LIGHT HOLDER",
+      "quantity": 91757.0,
+      "spend_gbp": 247048.01,
+      "orders": 4888
+    },
+    {
+      "stock_code": "23843",
+      "description": "PAPER CRAFT , LITTLE BIRDIE",
+      "quantity": 80995.0,
+      "spend_gbp": 168469.6,
+      "orders": 1
+    },
+    {
+      "stock_code": "M",
+      "description": "Manual",
+      "quantity": 9391.0,
+      "spend_gbp": 151777.67,
+      "orders": 626
+    },
+    {
+      "stock_code": "85099B",
+      "description": "JUMBO BAG RED RETROSPOT",
+      "quantity": 74224.0,
+      "spend_gbp": 134307.44,
+      "orders": 2612
+    },
+    {
+      "stock_code": "POST",
+      "description": "POSTAGE",
+      "quantity": 5235.0,
+      "spend_gbp": 124648.04,
+      "orders": 1803
+    },
+    {
+      "stock_code": "84879",
+      "description": "ASSORTED COLOUR BIRD ORNAMENT",
+      "quantity": 78234.0,
+      "spend_gbp": 124351.86,
+      "orders": 2652
+    },
+    {
+      "stock_code": "47566",
+      "description": "PARTY BUNTING",
+      "quantity": 23464.0,
+      "spend_gbp": 103283.38,
+      "orders": 2078
+    },
+    {
+      "stock_code": "23166",
+      "description": "MEDIUM CERAMIC TOP STORAGE JAR",
+      "quantity": 77916.0,
+      "spend_gbp": 81416.73,
+      "orders": 195
+    },
+    {
+      "stock_code": "22086",
+      "description": "PAPER CHAIN KIT 50'S CHRISTMAS ",
+      "quantity": 28380.0,
+      "spend_gbp": 76598.18,
+      "orders": 1691
+    },
+    {
+      "stock_code": "79321",
+      "description": "CHILLI LIGHTS",
+      "quantity": 14843.0,
+      "spend_gbp": 69084.3,
+      "orders": 922
+    },
+    {
+      "stock_code": "85099F",
+      "description": "JUMBO BAG STRAWBERRY",
+      "quantity": 35842.0,
+      "spend_gbp": 64127.77,
+      "orders": 1514
+    }
+  ]
+}

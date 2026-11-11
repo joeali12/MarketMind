@@ -13,7 +13,7 @@ Status codes: **PASS** (verified by code/run), **PARTIAL**, **BLOCKED** (externa
 | Model evaluation + limitations | PASS | Model quality page + model card |
 | Notebook Restart & Run All | PASS | `nbconvert --execute` 0 errors (2026-11-06) |
 | joblib artifacts for inference | PASS | artifacts/; app loads; no silent retrain |
-| Public deploy | BLOCKED | D1 preferred Streamlit Community Cloud; D8 publish not approved — prep only |
+| Public deploy | PARTIAL | D1/D8 approved 2026-11-11 for Streamlit Community Cloud; no live URL yet |
 | README with results + credit | PASS | README table from metadata; live URL pending |
 | Presentation 10–12 slides | PASS | `docs/presentation_outline.md` draft |
 | LinkedIn/CV | PASS | drafts only; unpublished |

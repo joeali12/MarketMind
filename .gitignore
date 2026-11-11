@@ -31,6 +31,11 @@ data/raw/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+# Small derived demo tables for the Streamlit academic app (not the raw UCI workbook).
+!data/processed/customer_train.parquet
+!data/processed/customer_test.parquet
+!data/processed/pca_train.parquet
+!data/processed/test_predictions.parquet
 # Upload temp sessions (privacy)
 data/uploads/tmp/*
 !data/uploads/tmp/.gitkeep
@@ -48,6 +53,7 @@ artifacts/*
 # Reports with generated figures (optional commit of small JSON later)
 reports/figures/*
 !reports/figures/.gitkeep
+!reports/figures/test_residuals.png
 
 # IDE / OS
 .idea/

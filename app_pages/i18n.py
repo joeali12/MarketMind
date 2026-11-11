@@ -29,12 +29,13 @@ STRINGS: dict[str, dict[str, str]] = {
     # --- Navigation ---
     "nav.section_main": {"en": "Main tasks", "ar": "المهام الأساسية"},
     "nav.section_project": {"en": "More details", "ar": "تفاصيل إضافية"},
-    "nav.home": {"en": "Home", "ar": "البداية"},
-    "nav.groups": {"en": "Customer groups", "ar": "مجموعات الزباين"},
-    "nav.profile": {"en": "Customer profile", "ar": "ملف الزبون"},
+    "nav.home": {"en": "Dashboard", "ar": "لوحة التحليل"},
+    "nav.products": {"en": "Products", "ar": "المنتجات"},
+    "nav.groups": {"en": "Groups", "ar": "المجموعات"},
+    "nav.profile": {"en": "Profile", "ar": "الملف"},
     "nav.overview": {"en": "Store dashboard", "ar": "لوحة المتجر"},
-    "nav.validation": {"en": "Upload data", "ar": "رفع البيانات"},
-    "nav.quality": {"en": "Prediction quality", "ar": "جودة التوقع"},
+    "nav.validation": {"en": "Upload", "ar": "الرفع"},
+    "nav.quality": {"en": "Project", "ar": "المشروع"},
     # --- Shared chrome ---
     "shared.simple_terms": {"en": "In simple terms", "ar": "ببساطة"},
     "shared.learn_more": {"en": "Learn more", "ar": "اعرف أكتر"},
@@ -59,16 +60,32 @@ STRINGS: dict[str, dict[str, str]] = {
     # --- Home ---
     "home.badge": {"en": "Demo with sample data", "ar": "تجربة ببيانات نموذجية"},
     "home.title": {
-        "en": "Know your customers",
-        "ar": "اعرف زباينك",
+        "en": "Store overview",
+        "ar": "لوحة التحليل",
     },
     "home.subtitle": {
-        "en": "See who shops with you, how they buy, and a calm estimate of spend over the next 90 days.",
-        "ar": "شوف مين بيشتري، إزاي بيشتري، وتقدير هادي لصرف ٩٠ يوماً الجايين.",
+        "en": "Eligible sales, orders, and customers from the bundled UK sample. GBP, no currency conversion.",
+        "ar": "مبيعات مؤهلة وطلبات وزبائن من العينة البريطانية المرفقة. بالجنيه الإسترليني ومن غير تحويل.",
     },
     "home.note": {
-        "en": "Four simple steps: check a file, open the store summary, browse groups, then open a customer.",
-        "ar": "أربع خطوات بسيطة: افحص ملف، افتح ملخص المتجر، شوف المجموعات، بعدين افتح ملف زبون.",
+        "en": "These figures describe the historical sample only. They are not your uploaded file and not a forecast.",
+        "ar": "الأرقام دي وصف للعينة التاريخية فقط. مش ملفك المرفوع ومش توقع.",
+    },
+    "store.sales": {"en": "Eligible sales", "ar": "مبيعات مؤهلة"},
+    "store.orders": {"en": "Orders", "ar": "الطلبات"},
+    "store.customers": {"en": "Customers", "ar": "الزبائن"},
+    "store.aov": {"en": "Avg. order value", "ar": "متوسط الطلب"},
+    "store.returning": {"en": "Returning customers", "ar": "زبائن راجعون"},
+    "store.chart": {"en": "Monthly eligible spend", "ar": "الصرف المؤهل الشهري"},
+    "store.top_products": {"en": "Top products by eligible spend", "ar": "أعلى المنتجات حسب الصرف المؤهل"},
+    "products.title": {"en": "Products", "ar": "المنتجات"},
+    "products.subtitle": {
+        "en": "Historical product sales from the UK sample. Not a prediction of what a customer will need.",
+        "ar": "مبيعات المنتجات التاريخية من العينة البريطانية. مش توقع لاحتياج زبون.",
+    },
+    "products.no_category": {
+        "en": "This sample has no product-category column, so category charts stay off.",
+        "ar": "العينة دي مفيهاش عمود تصنيف، فرسوم التصنيف متقفل.",
     },
     "home.demo_warning_title": {
         "en": "Demo with sample shop data — not your live shop",
@@ -599,15 +616,15 @@ def format_model_name(raw: str | None) -> str:
 
 
 def render_language_switcher() -> str:
-    """Sidebar language control; persists in session_state across pages/reruns."""
+    """Top-bar language control. Persists across pages."""
     if LANG_KEY not in st.session_state:
         st.session_state[LANG_KEY] = "ar"
-    with st.sidebar:
-        st.segmented_control(
-            t("lang.label"),
-            options=list(SUPPORTED),
-            format_func=lambda code: t(f"lang.{code}"),
-            key=LANG_KEY,
-            help="العربية / English",
-        )
+    st.segmented_control(
+        t("lang.label"),
+        options=list(SUPPORTED),
+        format_func=lambda code: "EN" if code == "en" else "عربي",
+        key=LANG_KEY,
+        label_visibility="collapsed",
+        help="العربية / English",
+    )
     return get_lang()
