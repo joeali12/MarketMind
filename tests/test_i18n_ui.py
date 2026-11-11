@@ -91,6 +91,7 @@ def test_apptest_home_both_languages_and_nav():
 
     for page in [
         "app_pages/products.py",
+        "app_pages/overview.py",
         "app_pages/segments.py",
         "app_pages/customer_lookup.py",
         "app_pages/data_validation.py",

@@ -102,6 +102,19 @@ header[data-testid="stHeader"] {{
 .stApp {{
   background: #f8f9ff;
 }}
+[data-testid="stPageLink"] a {{
+  border-radius: 999px;
+  padding: 0.28rem 0.7rem;
+  font-weight: 600;
+  color: #0b1c30;
+  text-decoration: none;
+}}
+[data-testid="stPageLink"] a:hover {{
+  background: #e2dfff;
+}}
+[data-testid="stMetric"] {{
+  border-radius: 16px;
+}}
 /* Calm surfaces — no gradients / neon */
 [data-testid="stMetric"] {{
   background: #FFFFFF;
