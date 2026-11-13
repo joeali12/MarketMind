@@ -33,9 +33,10 @@ STRINGS: dict[str, dict[str, str]] = {
     "nav.products": {"en": "Products", "ar": "المنتجات"},
     "nav.groups": {"en": "Groups", "ar": "المجموعات"},
     "nav.profile": {"en": "Profile", "ar": "الملف"},
-    "nav.overview": {"en": "Store dashboard", "ar": "لوحة المتجر"},
+    "nav.overview": {"en": "Summary", "ar": "الملخص"},
     "nav.validation": {"en": "Upload", "ar": "الرفع"},
-    "nav.quality": {"en": "Project", "ar": "المشروع"},
+    "nav.quality": {"en": "Quality", "ar": "الجودة"},
+    "nav.more": {"en": "More", "ar": "المزيد"},
     # --- Shared chrome ---
     "shared.simple_terms": {"en": "In simple terms", "ar": "ببساطة"},
     "shared.learn_more": {"en": "Learn more", "ar": "اعرف أكتر"},
@@ -78,6 +79,27 @@ STRINGS: dict[str, dict[str, str]] = {
     "store.returning": {"en": "Returning customers", "ar": "زبائن راجعون"},
     "store.chart": {"en": "Monthly eligible spend", "ar": "الصرف المؤهل الشهري"},
     "store.top_products": {"en": "Top products by eligible spend", "ar": "أعلى المنتجات حسب الصرف المؤهل"},
+    "store.insights": {"en": "What the sample shows", "ar": "اللي بتوضحه العينة"},
+    "store.caveat": {
+        "en": "These notes describe the historical UK sample. They are not causal claims about marketing actions, and they are not your uploaded shop.",
+        "ar": "الملحوظات دي وصف للعينة البريطانية التاريخية. مش ادعاء سببي عن إجراءات تسويقية، ومش متجرك المرفوع.",
+    },
+    "store.evidence_numbers": {
+        "en": "United Kingdom share of eligible spend: {uk}. Cancellation-marked rows: {cancel}.",
+        "ar": "نصيب المملكة المتحدة من الصرف المؤهل: {uk}. صفوف الإلغاء: {cancel}.",
+    },
+    "store.insight_1": {
+        "en": "Eligible transaction volume varies substantially by month across 2009–2011.",
+        "ar": "حجم المعاملات المؤهلة بيتغيّر بشكل واضح من شهر لشهر بين ٢٠٠٩–٢٠١١.",
+    },
+    "store.insight_2": {
+        "en": "Line spend is heavily right-skewed; a small share of lines dominate monetary value.",
+        "ar": "مصروف السطر منحرف لليمين؛ جزء صغير من السطور بيمثل جزء كبير من القيمة.",
+    },
+    "store.insight_3": {
+        "en": "United Kingdom accounts for the large majority of eligible spend in this dataset.",
+        "ar": "المملكة المتحدة تمثل غالبية المصروف المؤهل في العينة دي.",
+    },
     "products.title": {"en": "Products", "ar": "المنتجات"},
     "products.subtitle": {
         "en": "Historical product sales from the UK sample. Not a prediction of what a customer will need.",

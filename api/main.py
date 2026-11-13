@@ -11,7 +11,8 @@ from typing import Any
 import pandas as pd
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,6 +39,8 @@ from api.services import upload_assistant  # noqa: E402
 from api.services import upload_profile  # noqa: E402
 from api.services import upload_store  # noqa: E402
 from api.services import gap_fill as gap_fill_svc  # noqa: E402
+from api.services import canonical_upload  # noqa: E402
+from api.services import column_mapping as cmap_svc  # noqa: E402
 from marketmind.data.cleaning import eligible_positive_spend_mask  # noqa: E402
 from marketmind.inference import predict_customer  # noqa: E402
 
@@ -52,11 +55,31 @@ app.add_middleware(
         "http://localhost:3000",
         "http://127.0.0.1:3001",
         "http://localhost:3001",
+        "http://127.0.0.1:8501",
+        "http://localhost:8501",
+        "http://127.0.0.1:8502",
+        "http://localhost:8502",
+        "http://127.0.0.1:8503",
+        "http://localhost:8503",
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+STITCH_DIR = ROOT / "static" / "stitch"
+
+
+@app.get("/")
+def product_home() -> RedirectResponse:
+    """Public product face: exact Stitch upload screen, backed by this API."""
+    return RedirectResponse(url="/stitch/welcome_upload_pipeline.html")
+
+
+if STITCH_DIR.is_dir():
+    app.mount("/stitch", StaticFiles(directory=str(STITCH_DIR), html=False), name="stitch")
 
 
 @app.on_event("startup")
@@ -498,7 +521,8 @@ async def upload(file: UploadFile = File(...)) -> dict[str, Any]:
 
     path = upload_store.upload_path(meta.session_id)
     try:
-        df = clean_svc.read_upload_dataframe(path, nrows=MAX_PREVIEW_ROWS + 1)
+        meta = canonical_upload.ensure_workbook_meta(meta)
+        df = canonical_upload.read_raw_source(meta, nrows=MAX_PREVIEW_ROWS + 1)
     except Exception as exc:  # noqa: BLE001
         upload_store.discard_session(meta.session_id)
         upload_store.safe_log_outcome(meta.session_id, outcome="read_fail")
@@ -508,8 +532,23 @@ async def upload(file: UploadFile = File(...)) -> dict[str, Any]:
     if truncated:
         df = df.iloc[:MAX_PREVIEW_ROWS]
     meta.row_count = int(len(df))
+    # Seed high-confidence auto mapping only when the sales sheet is known.
+    # Multi-sheet workbooks must not lock mapping to the first sheet silently.
+    resolved: dict[str, Any] = {
+        "needs_user_mapping": True,
+        "mapping_confirmed": False,
+        "effective_mapping": {},
+    }
+    if not canonical_upload.needs_sheet_selection(meta):
+        resolved = canonical_upload.resolve_mapping(meta, [str(c) for c in df.columns])
+        if resolved.get("mapping_confirmed") and not meta.mapping_confirmed:
+            meta.column_mapping = resolved["effective_mapping"]
+            meta.mapping_confirmed = True
+            if meta.column_mapping.get("category"):
+                meta.has_category_mapped = True
+                meta.category_column = meta.column_mapping["category"]
     upload_store.save_meta(meta)
-    date_info = clean_svc.validate_upload_frame(df).get("date_format")
+    date_info = canonical_upload.validate_for_upload(meta).get("date_format")
     upload_store.safe_log_outcome(
         meta.session_id, outcome="stored", row_count=meta.row_count
     )
@@ -524,17 +563,23 @@ async def upload(file: UploadFile = File(...)) -> dict[str, Any]:
         "currency_code": meta.currency_code,
         "date_format": meta.date_format,
         "date_format_info": date_info,
+        "workbook_sheets": meta.workbook_sheets or [],
+        "selected_sheet": meta.selected_sheet,
+        "needs_sheet_selection": canonical_upload.needs_sheet_selection(meta),
+        "mapping_confirmed": meta.mapping_confirmed,
+        "needs_user_mapping": bool(resolved.get("needs_user_mapping"))
+        and not meta.mapping_confirmed,
         "note_en": (
             "File stored temporarily for review only. Contents are not logged. "
             "Session files are deleted on discard, export, or after 2 hours. "
-            "Select currency and confirm date format before analysis. "
-            "Amounts are not labelled GBP unless you choose GBP."
+            "Confirm column mapping, currency, and date format before analysis. "
+            "Amounts are not labelled with a currency unless you choose one."
         ),
         "note_ar": (
             "الملف متخزن مؤقتًا للمراجعة بس. المحتوى مش بيتسجل في اللوجات. "
             "بيتيمسح عند الإلغاء أو التصدير أو بعد ساعتين. "
-            "اختار العملة وأكّد صيغة التاريخ قبل التحليل. "
-            "المبالغ مش هتتوسم كجنيه إسترليني إلا لو اخترت GBP."
+            "أكّد ربط الأعمدة والعملة وصيغة التاريخ قبل التحليل. "
+            "المبالغ مش هتتوسم بعملة إلا لو اخترت عملة."
         ),
     }
 
@@ -544,6 +589,8 @@ class UploadSettingsBody(BaseModel):
     currency_code: str | None = None
     date_format: str | None = None
     confirm_date_format: bool = False
+    analysis_currency_filter: str | None = None
+    selected_sheet: str | None = None
 
 
 @app.post("/api/upload/settings")
@@ -578,6 +625,28 @@ def upload_settings(body: UploadSettingsBody) -> dict[str, Any]:
     if body.confirm_date_format and meta.date_format:
         meta.date_format_confirmed = True
 
+    if body.analysis_currency_filter is not None:
+        filt = body.analysis_currency_filter.strip().upper() or None
+        meta.analysis_currency_filter = filt
+
+    if body.selected_sheet is not None:
+        meta = canonical_upload.ensure_workbook_meta(meta)
+        sheet = body.selected_sheet.strip()
+        sheets = meta.workbook_sheets or []
+        if sheet and sheet not in sheets:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Worksheet not found. Available: {sheets}",
+            )
+        previous_sheet = meta.selected_sheet
+        meta.selected_sheet = sheet or None
+        # Changing worksheet invalidates prior column mapping for that sheet.
+        if previous_sheet != meta.selected_sheet:
+            meta.column_mapping = None
+            meta.mapping_confirmed = False
+            meta.has_category_mapped = False
+            meta.category_column = None
+
     upload_store.save_meta(meta)
     upload_store.safe_log_outcome(
         meta.session_id,
@@ -592,6 +661,66 @@ def upload_settings(body: UploadSettingsBody) -> dict[str, Any]:
         "date_format_confirmed": meta.date_format_confirmed,
         "has_category_mapped": meta.has_category_mapped,
         "category_column": meta.category_column,
+        "analysis_currency_filter": meta.analysis_currency_filter,
+        "selected_sheet": meta.selected_sheet,
+        "workbook_sheets": meta.workbook_sheets or [],
+        "mapping_confirmed": meta.mapping_confirmed,
+    }
+
+
+class ColumnMappingBody(BaseModel):
+    session_id: str
+    mapping: dict[str, str] = Field(default_factory=dict)
+    confirm: bool = True
+
+
+@app.post("/api/upload/mapping")
+def upload_column_mapping(body: ColumnMappingBody) -> dict[str, Any]:
+    """Persist user-confirmed source→canonical column mapping for this session."""
+    meta = _upload_meta(body.session_id)
+    if canonical_upload.needs_sheet_selection(meta):
+        raise HTTPException(
+            status_code=400,
+            detail="Select an Excel worksheet before confirming column mapping",
+        )
+    raw = canonical_upload.read_raw_source(meta, nrows=MAX_PREVIEW_ROWS)
+    columns = [str(c) for c in raw.columns]
+    suggestions = cmap_svc.suggest_mappings(columns)
+    merged = cmap_svc.merge_user_mapping(suggestions, body.mapping)
+    # Validate sources exist
+    for canon, src in merged.items():
+        if src not in columns:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Source column {src!r} for {canon} not in file",
+            )
+    caps = cmap_svc.assess_capabilities(merged)
+    if body.confirm and not caps["analysis_ready_minimum"]:
+        raise HTTPException(
+            status_code=400,
+            detail=caps.get("message_en")
+            or "Map product and monetary columns before confirming",
+        )
+    meta.column_mapping = merged
+    meta.mapping_confirmed = bool(body.confirm and caps["analysis_ready_minimum"])
+    if merged.get("category"):
+        meta.has_category_mapped = True
+        meta.category_column = merged["category"]
+    else:
+        meta.has_category_mapped = False
+        meta.category_column = None
+    upload_store.save_meta(meta)
+    upload_store.safe_log_outcome(
+        meta.session_id,
+        outcome="mapping_confirmed" if meta.mapping_confirmed else "mapping_saved",
+        extra={"fields": sorted(merged.keys())},
+    )
+    return {
+        "session_id": meta.session_id,
+        "column_mapping": merged,
+        "mapping_confirmed": meta.mapping_confirmed,
+        "capabilities": caps,
+        "suggestions": suggestions,
     }
 
 
@@ -599,8 +728,12 @@ def upload_settings(body: UploadSettingsBody) -> dict[str, Any]:
 def upload_file_profile(session_id: str) -> dict[str, Any]:
     """Factual summary of an upload before / during cleaning review."""
     meta = _upload_meta(session_id)
-    path = upload_store.upload_path(session_id)
-    df = clean_svc.read_upload_dataframe(path, nrows=MAX_PREVIEW_ROWS)
+    meta = canonical_upload.ensure_workbook_meta(meta)
+    upload_store.save_meta(meta)
+    try:
+        df = canonical_upload.read_raw_source(meta, nrows=MAX_PREVIEW_ROWS)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     body = upload_profile.build_profile(df, meta, date_format=meta.date_format)
     upload_store.safe_log_outcome(
         session_id,
@@ -627,14 +760,23 @@ class AssistantBody(BaseModel):
 def upload_assistant_chat(body: AssistantBody) -> dict[str, Any]:
     """Open-ended grounded Q&A over the current upload — no raw rows sent externally."""
     meta = _upload_meta(body.session_id)
-    path = upload_store.upload_path(body.session_id)
-    df = clean_svc.read_upload_dataframe(path, nrows=MAX_PREVIEW_ROWS)
+    df = canonical_upload.read_raw_source(meta, nrows=MAX_PREVIEW_ROWS)
     profile = upload_profile.build_profile(df, meta, date_format=meta.date_format)
+    parsed = None
+    try:
+        if meta.mapping_confirmed or meta.column_mapping:
+            parsed = canonical_upload.load_canonical_frame(
+                meta, nrows=MAX_PREVIEW_ROWS, require_mapping=False
+            )
+    except Exception:  # noqa: BLE001
+        parsed = None
     proposals = clean_svc.build_proposals(
         df,
         date_format=meta.date_format,
         currency_code=meta.currency_code,
         category_column=meta.category_column if meta.has_category_mapped else None,
+        column_mapping=meta.column_mapping,
+        parsed_override=parsed,
     )
     analytics: dict[str, Any] | None = None
     try:
@@ -694,64 +836,82 @@ def upload_assistant_status() -> dict[str, Any]:
 @app.post("/api/upload/validate")
 def upload_validate(session_id: str, category_column: str | None = None) -> dict[str, Any]:
     try:
-        path = upload_store.upload_path(session_id)
         meta = upload_store.load_meta(session_id)
+        upload_store.upload_path(session_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    df = clean_svc.read_upload_dataframe(path, nrows=MAX_PREVIEW_ROWS)
-    result = clean_svc.validate_upload_frame(df)
+    meta = canonical_upload.ensure_workbook_meta(meta)
     if category_column is not None:
-        # Explicit map (including "" to clear). Auto-detect alone does not enable charts.
+        if canonical_upload.needs_sheet_selection(meta):
+            raise HTTPException(status_code=400, detail="Select a worksheet first")
+        raw = canonical_upload.read_raw_source(meta, nrows=MAX_PREVIEW_ROWS)
+        mapping = dict(meta.column_mapping or {})
         if category_column == "":
             meta.has_category_mapped = False
             meta.category_column = None
-            result["category_available"] = False
-            result["detected_category_column"] = None
+            mapping.pop("category", None)
         else:
-            if category_column not in df.columns:
+            if category_column not in raw.columns:
                 raise HTTPException(status_code=400, detail="category_column not in file")
-            result["detected_category_column"] = category_column
-            result["category_available"] = True
             meta.has_category_mapped = True
             meta.category_column = category_column
-    else:
-        # Initial validate: report auto-detect but do not mark mapped until user confirms
-        result["category_available"] = False
-        meta.has_category_mapped = False
-        # keep detected name in result for UI suggestions only
-    result["mappable_columns"] = [str(c) for c in df.columns]
+            mapping["category"] = category_column
+        meta.column_mapping = mapping or None
+    result = canonical_upload.validate_for_upload(meta)
+    # Persist ISO auto-confirm side effects from validate_for_upload
     upload_store.save_meta(meta)
+    result["mappable_columns"] = result.get("columns") or []
     upload_store.safe_log_outcome(
         session_id,
         outcome="validated",
         row_count=result.get("row_count"),
-        extra={"code": "ok" if result["ok"] else "missing_columns",
-               "missing_columns": result.get("missing_columns")},
+        extra={
+            "code": "ok" if result.get("ok") else "mapping_incomplete",
+            "missing_columns": result.get("missing_columns"),
+        },
     )
-    preview = df.head(15).where(pd.notna(df.head(15)), None)
+    try:
+        df = canonical_upload.read_raw_source(meta, nrows=15)
+        preview = df.head(15).where(pd.notna(df.head(15)), None).to_dict(orient="records")
+    except Exception:  # noqa: BLE001
+        preview = []
     return {
         "session_id": session_id,
         "validation": result,
-        "preview_rows": preview.to_dict(orient="records"),
+        "preview_rows": preview,
         "has_category_mapped": meta.has_category_mapped,
         "category_column": meta.category_column,
+        "mapping_confirmed": meta.mapping_confirmed,
+        "selected_sheet": meta.selected_sheet,
+        "workbook_sheets": meta.workbook_sheets or [],
+        "column_mapping": meta.column_mapping or {},
     }
 
 
 @app.post("/api/upload/cleaning-proposals")
 def upload_proposals(session_id: str) -> dict[str, Any]:
     try:
-        path = upload_store.upload_path(session_id)
         meta = upload_store.load_meta(session_id)
+        upload_store.upload_path(session_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    df = clean_svc.read_upload_dataframe(path, nrows=MAX_PREVIEW_ROWS)
+    df = canonical_upload.read_raw_source(meta, nrows=MAX_PREVIEW_ROWS)
+    parsed = None
+    try:
+        if meta.mapping_confirmed or (meta.column_mapping and cmap_svc.assess_capabilities(meta.column_mapping).get("analysis_ready_minimum")):
+            parsed = canonical_upload.load_canonical_frame(
+                meta, nrows=MAX_PREVIEW_ROWS, require_mapping=False
+            )
+    except Exception:  # noqa: BLE001
+        parsed = None
     payload = clean_svc.build_proposals(
         df,
         date_format=meta.date_format,
         currency_code=meta.currency_code,
         category_column=meta.category_column if meta.has_category_mapped else None,
+        column_mapping=meta.column_mapping,
+        parsed_override=parsed,
     )
     upload_store.safe_log_outcome(
         session_id,
@@ -832,6 +992,64 @@ class GapFillBody(BaseModel):
     session_id: str
     patches: list[GapPatch] = Field(default_factory=list)
     apply_all_smart: bool = False
+
+
+class RestoreSafeFillBody(BaseModel):
+    session_id: str
+    confirm_restore: bool = False
+
+
+@app.get("/api/upload/{session_id}/safe-fill-backup")
+def upload_safe_fill_backup_status(session_id: str) -> dict[str, Any]:
+    """Whether a session-scoped pre-safe-fill backup exists for undo."""
+    try:
+        path = upload_store.upload_path(session_id)
+        upload_store.load_meta(session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    backup = gap_fill_svc.pre_safe_fill_backup_path(path)
+    return {
+        "session_id": session_id,
+        "backup_available": backup.exists() and backup.stat().st_size > 0,
+    }
+
+
+@app.post("/api/upload/restore-safe-fill")
+def upload_restore_safe_fill(body: RestoreSafeFillBody) -> dict[str, Any]:
+    """Restore the active upload file from the pre-safe-fill backup (session only)."""
+    if not body.confirm_restore:
+        raise HTTPException(status_code=400, detail="confirm_restore must be true")
+    try:
+        meta = upload_store.load_meta(body.session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    from api.services import assistant_tools
+
+    result = assistant_tools.execute_tool(
+        "restore_pre_safe_fill", meta, {"confirm_restore": True}
+    )
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=400,
+            detail=result.get("message_en") or result.get("error_code") or "restore_failed",
+        )
+    path = upload_store.upload_path(body.session_id)
+    refreshed = clean_svc.build_proposals(
+        clean_svc.read_upload_dataframe(path, nrows=None),
+        date_format=meta.date_format,
+        currency_code=meta.currency_code,
+        category_column=meta.category_column if meta.has_category_mapped else None,
+    )
+    profile = upload_profile.build_profile(meta)
+    return {
+        "session_id": body.session_id,
+        "restored": True,
+        "profile": profile,
+        "unresolved_preview": refreshed.get("unresolved_preview") or [],
+        "gap_fill": refreshed.get("gap_fill") or {},
+        "note_en": result.get("message_en"),
+        "note_ar": result.get("message_ar"),
+    }
 
 
 @app.post("/api/upload/gap-fill")

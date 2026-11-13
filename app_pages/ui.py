@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import html
 from collections.abc import Sequence
 from typing import Any
 
 import pandas as pd
 import streamlit as st
 
-from app_pages.i18n import get_lang, is_rtl, t, translate_segment_label
+from app_pages.i18n import LANG_KEY, get_lang, is_rtl, t, translate_segment_label
 
 # Calm financial palette (mirrors .streamlit/config.toml)
 NAVY = "#13243A"
@@ -97,16 +98,19 @@ h1, h2, h3,
 [data-testid="stToolbar"] {{ display: none; }}
 [data-testid="stDecoration"] {{ display: none; }}
 header[data-testid="stHeader"] {{
-  background: #f8f9ff;
+  display: none;
 }}
 .stApp {{
   background: #f8f9ff;
 }}
+.block-container {{
+  max-width: 1120px;
+}}
 [data-testid="stPageLink"] a {{
   border-radius: 999px;
-  padding: 0.28rem 0.7rem;
+  padding: 0.2rem 0.65rem;
   font-weight: 600;
-  color: #0b1c30;
+  color: #13243a;
   text-decoration: none;
 }}
 [data-testid="stPageLink"] a:hover {{
@@ -242,3 +246,226 @@ def inject_motion_preferences() -> None:
 
 def lang_code() -> str:
     return get_lang()
+
+
+def apply_lang_query() -> None:
+    lang = st.query_params.get("lang")
+    if lang in ("ar", "en"):
+        st.session_state[LANG_KEY] = lang
+
+
+def _lang_href(path: str) -> str:
+    return f"{path}?lang={get_lang()}"
+
+
+def render_stitch_header(active_path: str) -> None:
+    """Top bar matching the approved Stitch store screen."""
+    items = [
+        ("/", t("nav.home")),
+        ("/products", t("nav.products")),
+        ("/segments", t("nav.groups")),
+        ("/data_validation", t("nav.validation")),
+        ("/customer_lookup", t("nav.profile")),
+    ]
+    links = []
+    for path, label in items:
+        current = " aria-current=\"page\"" if path == active_path else ""
+        links.append(
+            f'<a class="mm-pill" href="{html.escape(_lang_href(path))}"{current}>'
+            f"{html.escape(label)}</a>"
+        )
+    more = (
+        f'<a class="mm-text" href="{html.escape(_lang_href("/overview"))}">'
+        f"{html.escape(t('nav.overview'))}</a>"
+        f'<a class="mm-text" href="{html.escape(_lang_href("/model_quality"))}">'
+        f"{html.escape(t('nav.quality'))}</a>"
+    )
+    current = get_lang()
+    en_cls = "mm-lang on" if current == "en" else "mm-lang"
+    ar_cls = "mm-lang on" if current == "ar" else "mm-lang"
+    langs = (
+        f'<span class="mm-langs">'
+        f'<a class="{en_cls}" href="?lang=en">EN</a>'
+        f'<a class="{ar_cls}" href="?lang=ar">عربي</a>'
+        f"</span>"
+    )
+    st.html(
+        f"""
+        <header class="mm-bar">
+          <a class="mm-brand" href="{html.escape(_lang_href("/"))}">MarketMind</a>
+          <nav class="mm-nav">{"".join(links)}</nav>
+          <div class="mm-side">{more}{langs}</div>
+        </header>
+        <style>
+          .mm-bar {{
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            max-width: 1120px;
+            margin: 0 auto 18px;
+            padding: 10px 8px;
+            flex-wrap: wrap;
+          }}
+          .mm-brand {{
+            font-weight: 700;
+            color: #0b1c30;
+            text-decoration: none;
+            letter-spacing: -0.03em;
+            font-size: 18px;
+          }}
+          .mm-nav {{
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            background: #eff4ff;
+            border-radius: 999px;
+            padding: 6px;
+          }}
+          .mm-pill {{
+            text-decoration: none;
+            color: #464555;
+            border-radius: 999px;
+            padding: 8px 14px;
+            font-size: 14px;
+          }}
+          .mm-pill[aria-current="page"] {{
+            background: #213145;
+            color: #eaf1ff;
+            font-weight: 600;
+          }}
+          .mm-side {{
+            margin-inline-start: auto;
+            display: flex;
+            gap: 14px;
+            align-items: center;
+          }}
+          .mm-text {{
+            color: #3525cd;
+            text-decoration: none;
+            font-size: 13px;
+          }}
+          .mm-langs {{
+            display: flex;
+            gap: 2px;
+            background: #eff4ff;
+            border-radius: 999px;
+            padding: 3px;
+          }}
+          .mm-lang {{
+            color: #464555;
+            text-decoration: none;
+            font-size: 12px;
+            border-radius: 999px;
+            padding: 4px 8px;
+          }}
+          .mm-lang.on {{
+            background: #fff;
+            color: #0b1c30;
+            font-weight: 600;
+          }}
+        </style>
+        """
+    )
+
+
+def render_stitch_dashboard(snapshot: dict, eda: dict) -> None:
+    """Store dashboard cards. Figures come from the UK sample snapshot, not the Stitch mock."""
+    kpis = snapshot.get("metrics") or {}
+    monthly = snapshot.get("monthly_trend") or []
+    products = (snapshot.get("products") or [])[:5]
+    uk = float(eda.get("uk_spend_share") or 0)
+    cancel = float(eda.get("cancellation_row_share") or 0)
+    date_min = str(kpis.get("date_min") or "")[:10]
+    date_max = str(kpis.get("date_max") or "")[:10]
+
+    def money(value: float) -> str:
+        return f"GBP {value:,.0f}"
+
+    values = [float(row.get("spend_gbp") or 0) for row in monthly]
+    peak = max(values) if values else 1
+    width, height = 640, 180
+    if len(values) >= 2:
+        step = width / (len(values) - 1)
+        coords = [
+            (index * step, height - (value / peak) * (height - 16) - 8)
+            for index, value in enumerate(values)
+        ]
+        line = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
+        area = f"0,{height} " + line + f" {width},{height}"
+    else:
+        line, area = "", ""
+
+    product_rows = []
+    for row in products:
+        product_rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(row.get('description') or ''))}</td>"
+            f"<td>{money(float(row.get('spend_gbp') or 0))}</td>"
+            f"<td>{int(row.get('quantity') or 0):,}</td>"
+            "</tr>"
+        )
+    chart = ""
+    if line:
+        chart = f"""
+        <svg viewBox="0 0 {width} {height}" role="img" aria-label="{html.escape(t('store.chart'))}">
+          <polygon points="{area}" fill="#4f46e5" opacity="0.16"></polygon>
+          <polyline points="{line}" fill="none" stroke="#4f46e5" stroke-width="3"></polyline>
+        </svg>
+        """
+    st.html(
+        f"""
+        <section class="mm-dash">
+          <p class="mm-kicker">{html.escape(t("home.badge"))}</p>
+          <div class="mm-kpis">
+            <article><span>{html.escape(t("store.sales"))}</span><strong>{money(float(kpis.get("sales_gbp") or 0))}</strong></article>
+            <article><span>{html.escape(t("store.orders"))}</span><strong>{int(kpis.get("orders") or 0):,}</strong></article>
+            <article><span>{html.escape(t("store.customers"))}</span><strong>{int(kpis.get("customers") or 0):,}</strong></article>
+            <article><span>{html.escape(t("store.aov"))}</span><strong>{money(float(kpis.get("average_order_value_gbp") or 0))}</strong></article>
+            <article><span>{html.escape(t("store.returning"))}</span><strong>{float(kpis.get("returning_customer_share") or 0):.1%}</strong></article>
+          </div>
+          <div class="mm-grid">
+            <article class="mm-card">
+              <h2>{html.escape(t("store.chart"))}</h2>
+              <p>{html.escape(date_min)} — {html.escape(date_max)}</p>
+              {chart}
+            </article>
+            <article class="mm-card">
+              <h2>{html.escape(t("store.insights"))}</h2>
+              <ul>
+                <li>{html.escape(t("store.insight_1"))}</li>
+                <li>{html.escape(t("store.insight_2"))}</li>
+                <li>{html.escape(t("store.insight_3"))}</li>
+              </ul>
+              <p>{html.escape(t("store.evidence_numbers", uk=f"{uk:.1%}", cancel=f"{cancel:.1%}"))}</p>
+            </article>
+          </div>
+          <article class="mm-card">
+            <h2>{html.escape(t("store.top_products"))}</h2>
+            <table>
+              <tbody>{"".join(product_rows)}</tbody>
+            </table>
+            <p>{html.escape(t("store.caveat"))}</p>
+          </article>
+        </section>
+        <style>
+          .mm-dash {{ max-width: 1120px; margin: 0 auto; }}
+          .mm-kicker {{ color: #464555; font-size: 13px; }}
+          .mm-kpis {{ display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }}
+          .mm-kpis article, .mm-card {{
+            background: #fff; border: 1px solid #c7c4d8; border-radius: 22px; padding: 16px 18px;
+          }}
+          .mm-kpis span, .mm-card p {{ color: #464555; font-size: 13px; }}
+          .mm-kpis strong {{ display: block; margin-top: 8px; font-size: 22px; color: #0b1c30; }}
+          .mm-grid {{ display: grid; grid-template-columns: 1.4fr 0.8fr; gap: 12px; margin-top: 12px; }}
+          .mm-card {{ margin-top: 12px; }}
+          .mm-card h2 {{ margin: 0 0 8px; font-size: 18px; color: #0b1c30; }}
+          .mm-card svg {{ width: 100%; height: auto; }}
+          .mm-card table {{ width: 100%; border-collapse: collapse; }}
+          .mm-card td {{ padding: 8px 0; border-bottom: 1px solid #e7e5f2; color: #0b1c30; }}
+          .mm-card td:last-child, .mm-card td:nth-child(2) {{ text-align: end; }}
+          @media (max-width: 800px) {{
+            .mm-kpis, .mm-grid {{ grid-template-columns: 1fr; }}
+          }}
+        </style>
+        """
+    )

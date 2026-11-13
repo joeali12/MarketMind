@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
@@ -17,9 +18,62 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-from app_pages.i18n import render_language_switcher, t  # noqa: E402
-from app_pages.ui import inject_direction_and_motion  # noqa: E402
+# Exact Stitch product face (copied from the approved export). Academic Streamlit
+# pages stay available with ?classic=1 for course checks.
+if st.query_params.get("classic") != "1":
+    screens = {
+        "welcome": "welcome_upload_pipeline.html",
+        "file": "file_understanding_setup.html",
+        "cleaning": "data_cleaning_review.html",
+        "store": "store_dashboard.html",
+    }
+    name = screens.get(st.query_params.get("screen", "welcome"), screens["welcome"])
+    # Same Stitch HTML as /stitch on the API. For live uploads against the API,
+    # open http://127.0.0.1:8000/ (or set MM_API_BASE). Streamlit serves the shell.
+    href = f"/app/static/stitch/{name}"
+    st.markdown(
+        f"""
+        <style>
+          [data-testid="stHeader"],
+          [data-testid="stToolbar"],
+          [data-testid="stDecoration"],
+          [data-testid="stSidebar"],
+          #MainMenu {{ display: none !important; }}
+          .block-container {{
+            padding: 0 !important;
+            max-width: 100% !important;
+          }}
+          html, body, .stApp {{
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+            background: #f8f9ff !important;
+          }}
+        </style>
+        <meta http-equiv="refresh" content="0; url={href}">
+        """,
+        unsafe_allow_html=True,
+    )
+    components.html(
+        f"""
+        <script>window.top.location.replace({href!r});</script>
+        <p style="font-family:Inter,sans-serif;padding:24px">
+          Opening MarketMind…
+          <a href="{href}">Continue</a>
+        </p>
+        """,
+        height=80,
+    )
+    st.stop()
 
+from app_pages.i18n import t  # noqa: E402
+from app_pages.ui import (  # noqa: E402
+    apply_lang_query,
+    inject_direction_and_motion,
+    render_stitch_header,
+)
+
+apply_lang_query()
 inject_direction_and_motion()
 
 store = st.Page("app_pages/home.py", title=t("nav.home"), icon=":material/dashboard:", default=True)
@@ -34,20 +88,5 @@ page = st.navigation(
     [store, upload, overview, products, groups, profile, project],
     position="hidden",
 )
-
-brand, nav, lang = st.columns([1.3, 5.2, 1.3], vertical_alignment="center")
-with brand:
-    st.markdown("**MarketMind**")
-with nav:
-    with st.container(horizontal=True, gap="small"):
-        st.page_link(store, label=t("nav.home"))
-        st.page_link(upload, label=t("nav.validation"))
-        st.page_link(overview, label=t("nav.overview"))
-        st.page_link(products, label=t("nav.products"))
-        st.page_link(groups, label=t("nav.groups"))
-        st.page_link(profile, label=t("nav.profile"))
-        st.page_link(project, label=t("nav.quality"))
-with lang:
-    render_language_switcher()
-
+render_stitch_header("/" if page.url_path == "" else f"/{page.url_path}")
 page.run()

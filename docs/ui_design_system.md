@@ -6,16 +6,16 @@ Calm, premium financial analytics for a busy shop owner. Visual-only; ML unchang
 
 | Token | Hex | Use |
 |---|---|---|
-| Navy | `#13243A` | Primary text, navigation |
-| Teal | `#0F5B5A` | Brand / primary actions |
-| Emerald | `#16835D` | Positive financial emphasis |
-| Off-white | `#F6F8F7` | Page background |
-| White | `#FFFFFF` | Cards / surfaces |
-| Muted slate | `#667085` | Secondary text |
-| Gold | `#C59A3B` | Occasional highlight only |
-| Red | theme error | Errors / negative only |
+| Ink | `#0B1C30` | Primary text |
+| Indigo | `#3525CD` | Links and active brand color |
+| Violet | `#4F46E5` | Spend chart stroke |
+| Inverse pill | `#213145` | Active navigation pill |
+| Surface | `#F8F9FF` | Page background |
+| White | `#FFFFFF` | Cards |
+| Muted | `#464555` | Secondary text |
+| Line | `#C7C4D8` | Card and pill borders |
 
-No gradients, neon, or competing accent rainbows.
+The public shell follows the approved Stitch store screen: pill navigation, rounded cards, and one indigo area chart. Figures stay the UK sample in GBP.
 
 ## Typography
 
@@ -30,14 +30,16 @@ Bold display font is **not** used for long paragraphs.
 ## Layout
 
 - Wide shell, white bordered cards, generous padding
-- Home: four tasks — upload, store dashboard, customer groups, customer profile
+- Landing page is the store dashboard: KPI cards, monthly eligible spend, evidence notes, top products
+- Top bar only: Dashboard, Products, Groups, Upload, Profile. Summary and Quality stay as text links. Language is a link in the same bar.
+- No permanent sidebar. Language switch sits in the top bar on every page
 - Technical detail behind **Learn more** expanders
 - Dual light/dark in `.streamlit/config.toml`; light is the product default
 
 ## Motion
 
 - Native Streamlit only + `prefers-reduced-motion`
-- No swipe-only controls; language switch in sidebar
+- No swipe-only controls
 
 ## Font hosting
 
