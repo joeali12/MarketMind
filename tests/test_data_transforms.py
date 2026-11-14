@@ -160,9 +160,14 @@ def test_add_invoice_flag_over_1000_via_assistant(client: TestClient):
 def test_parse_transform_intent_english():
     from api.services import data_transforms as dx
 
-    strip = dx.parse_transform_intent("Please strip time from the date column")
+    cols = ["Invoice", "Quantity", "Price", "InvoiceDate"]
+    strip = dx.parse_transform_intent(
+        "Please strip time from the date column", columns=cols
+    )
     assert strip and strip["op"] == "strip_time"
-    flag = dx.parse_transform_intent("Add a boolean column true for invoices above 1000 EGP")
+    flag = dx.parse_transform_intent(
+        "Add a boolean column true for invoices above 1000 EGP", columns=cols
+    )
     assert flag and flag["op"] == "add_invoice_flag"
     assert flag["threshold"] == 1000.0
 
@@ -170,10 +175,11 @@ def test_parse_transform_intent_english():
 def test_parse_intent_ignores_weak_and_picks_threshold_near_comparison():
     from api.services import data_transforms as dx
 
+    cols = ["Invoice", "Quantity", "Price", "InvoiceDate"]
     assert dx.parse_transform_intent("What is the invoice timestamp format?") is None
     assert dx.parse_transform_intent("rename something later") is None
     flag = dx.parse_transform_intent(
-        "In 2024 add a flag column true for invoices above 2500 EGP"
+        "In 2024 add a flag column true for invoices above 2500 EGP", columns=cols
     )
     assert flag and flag["op"] == "add_invoice_flag"
     assert flag["threshold"] == 2500.0
@@ -344,3 +350,93 @@ def test_protect_underscore_aliases_and_rename_mapping():
     )
     assert ren["ok"]
     assert meta.column_mapping["extra"] == "memo"
+
+
+def test_general_plan_filter_sort_assign_via_assistant(client: TestClient):
+    raw = (
+        "Invoice,StockCode,Description,Quantity,InvoiceDate,Price,Customer ID,Country\n"
+        "1,A,Tea,1,2024-01-15,10,C1,EG\n"
+        "2,B,Coffee,2,2024-01-16,20,C2,UK\n"
+        "3,C,Sugar,5,2024-01-17,5,C3,EG\n"
+    ).encode()
+    sid = _sid_with_mapping(client, raw)
+
+    res = client.post(
+        "/api/upload/assistant",
+        json={
+            "session_id": sid,
+            "question": "filter Country == 'EG'",
+            "lang": "en",
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    tools = body.get("tools_called") or []
+    assert "apply_data_transform" in tools or "preview_data_transform" in tools
+    if "apply_data_transform" not in tools:
+        res = client.post(
+            "/api/upload/assistant",
+            json={"session_id": sid, "question": "apply", "lang": "en"},
+        )
+        assert res.status_code == 200
+        assert res.json().get("data_mutated") is True
+
+    from api.services import upload_store, cleaning_proposals as clean_svc
+
+    meta = upload_store.load_meta(sid)
+    df = clean_svc.read_upload_dataframe(
+        upload_store.upload_path(sid), nrows=None, sheet_name=meta.selected_sheet
+    )
+    assert len(df) == 2
+    assert set(df["Country"].astype(str)) == {"EG"}
+
+    # Non-templated assign expression
+    res2 = client.post(
+        "/api/upload/assistant",
+        json={
+            "session_id": sid,
+            "question": "add column high = Quantity * Price > 15",
+            "lang": "en",
+        },
+    )
+    assert res2.status_code == 200, res2.text
+    body2 = res2.json()
+    if "apply_data_transform" not in (body2.get("tools_called") or []):
+        res2 = client.post(
+            "/api/upload/assistant",
+            json={"session_id": sid, "question": "apply", "lang": "en"},
+        )
+        assert res2.json().get("data_mutated") is True
+    meta = upload_store.load_meta(sid)
+    df = clean_svc.read_upload_dataframe(
+        upload_store.upload_path(sid), nrows=None, sheet_name=meta.selected_sheet
+    )
+    assert "high" in df.columns
+    flags = df["high"].astype(str).str.lower().tolist()
+    assert flags == ["false", "true"]  # 10 vs 25
+
+
+def test_safe_expr_rejects_attribute_and_import():
+    from api.services import session_mutate as sm
+    import pandas as pd
+
+    df = pd.DataFrame({"Quantity": [1, 2]})
+    try:
+        sm.eval_expr(df, "__import__('os').system('x')")
+        assert False, "should refuse"
+    except sm.SafeExprError:
+        pass
+    try:
+        sm.eval_expr(df, "Quantity.apply")
+        assert False, "should refuse"
+    except sm.SafeExprError:
+        pass
+    out = sm.eval_expr(df, "Quantity * 2")
+    assert list(out) == [2, 4]
+
+
+def test_refuse_unsafe_out_of_scope():
+    from api.services import data_transforms as dx
+
+    bad = dx.parse_transform_intent("retrain the model on this file")
+    assert bad and bad["op"] == "refuse"

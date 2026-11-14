@@ -583,11 +583,11 @@ def _is_session_transform_turn(question: str, meta: UploadSessionMeta | None) ->
         return False
     from api.services import data_transforms as _dx
 
-    return bool(
-        _dx.parse_transform_intent(
-            question, pending=getattr(meta, "pending_transform", None)
-        )
+    parsed = _dx.parse_transform_intent(
+        question, pending=getattr(meta, "pending_transform", None), meta=meta
     )
+    # Refuse messages still count as a transform turn (do not fall through to cleaning).
+    return bool(parsed)
 
 
 def _transform_turn_result(
@@ -675,7 +675,7 @@ def _open_ended_analytics_turn(
         from api.services import data_transforms as _dx
 
         if meta is not None and _dx.parse_transform_intent(
-            question, pending=getattr(meta, "pending_transform", None)
+            question, pending=getattr(meta, "pending_transform", None), meta=meta
         ):
             grounded = gemini_tool_loop.grounded_tool_answer(
                 question=question, lang=lang, meta=meta
@@ -745,7 +745,7 @@ def _open_ended_analytics_turn(
     from api.services import data_transforms as _dx
 
     if meta is not None and _dx.parse_transform_intent(
-        question, pending=getattr(meta, "pending_transform", None)
+        question, pending=getattr(meta, "pending_transform", None), meta=meta
     ):
         grounded = gemini_tool_loop.grounded_tool_answer(
             question=question, lang=lang, meta=meta
@@ -762,7 +762,10 @@ def _open_ended_analytics_turn(
             "quick_replies": [
                 "طبّق" if ar else "apply",
                 "شيل الساعة من التاريخ" if ar else "strip time from dates",
-                "ضيف عمود للفواتير > 1000" if ar else "flag invoices over 1000",
+                "رتب حسب InvoiceDate" if ar else "sort by InvoiceDate",
+                "ضيف عمود high = Quantity * Price > 500"
+                if ar
+                else "add column high = Quantity * Price > 500",
             ],
             "provider_label_en": "MarketMind (session transforms)",
             "provider_label_ar": "مساعد MarketMind (تحويلات الجلسة)",

@@ -24,6 +24,7 @@ ALLOWED_OPS = frozenset(
         "rename_column",
         "cast_numeric",
         "fill_constant",
+        "plan",  # general constrained session mutation plan
     }
 )
 
@@ -165,6 +166,7 @@ def preview_or_apply(
     threshold: float | None = None,
     fill_value: str | None = None,
     rename_to: str | None = None,
+    plan: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     op = (op or "").strip().lower()
     if op not in ALLOWED_OPS:
@@ -186,29 +188,58 @@ def preview_or_apply(
             "message_ar": "مش قادر أقرأ ملف الجلسة.",
         }
 
-    mapping = meta.column_mapping or {}
-    handler = {
-        "strip_time": _op_strip_time,
-        "add_invoice_flag": _op_add_invoice_flag,
-        "drop_column": _op_drop_column,
-        "rename_column": _op_rename_column,
-        "cast_numeric": _op_cast_numeric,
-        "fill_constant": _op_fill_constant,
-    }[op]
+    mapping = dict(meta.column_mapping or {})
 
-    result = handler(
-        df,
-        meta=meta,
-        mapping=mapping,
-        column=column,
-        new_column=new_column,
-        threshold=threshold,
-        fill_value=fill_value,
-        rename_to=rename_to,
-        apply=False,
-    )
-    if not result.get("ok"):
-        return result
+    if op == "plan":
+        from api.services import session_mutate
+
+        steps = plan or []
+        result = session_mutate.execute_steps(
+            df, steps, mapping=mapping, protected_drop=_PROTECTED_DROP
+        )
+        if not result.get("ok"):
+            return result
+        result["op"] = "plan"
+        result["plan"] = steps
+        # Aggregates only — no raw row dump for model/tool logs.
+        impact = result.get("impact") or {}
+        result["preview_en"] = (
+            f"Plan ({len(steps)} steps): {result.get('preview_en')}. "
+            f"Rows {impact.get('rows_before')}→{impact.get('rows_after')} "
+            f"(Δ{impact.get('rows_delta')}); "
+            f"added cols {impact.get('cols_added')}; removed {impact.get('cols_removed')}."
+        )
+        result["preview_ar"] = (
+            f"خطة ({len(steps)} خطوة): {result.get('preview_ar')}. "
+            f"صفوف {impact.get('rows_before')}→{impact.get('rows_after')} "
+            f"(Δ{impact.get('rows_delta')})؛ "
+            f"أعمدة جديدة {impact.get('cols_added')}؛ محذوفة {impact.get('cols_removed')}."
+        )
+        result["apply_en"] = result["preview_en"].replace("Plan", "Applied plan", 1)
+        result["apply_ar"] = "اتطبّقت " + result["preview_ar"]
+        result.pop("mapping", None)
+    else:
+        handler = {
+            "strip_time": _op_strip_time,
+            "add_invoice_flag": _op_add_invoice_flag,
+            "drop_column": _op_drop_column,
+            "rename_column": _op_rename_column,
+            "cast_numeric": _op_cast_numeric,
+            "fill_constant": _op_fill_constant,
+        }[op]
+        result = handler(
+            df,
+            meta=meta,
+            mapping=mapping,
+            column=column,
+            new_column=new_column,
+            threshold=threshold,
+            fill_value=fill_value,
+            rename_to=rename_to,
+            apply=False,
+        )
+        if not result.get("ok"):
+            return result
 
     if not confirm_apply:
         result["preview_only"] = True
@@ -221,7 +252,6 @@ def preview_or_apply(
             (result.get("preview_ar") or "المعاينة جاهزة.")
             + " رد بـ «طبّق» عشان يتكتب على ملف الجلسة."
         )
-        # Stash resolved args so a bare «طبّق» can finish the job.
         from api.services import upload_store
 
         meta.pending_transform = {
@@ -231,22 +261,40 @@ def preview_or_apply(
             "threshold": result.get("threshold", threshold),
             "fill_value": fill_value,
             "rename_to": result.get("rename_to") or rename_to,
+            "plan": plan if op == "plan" else None,
         }
         upload_store.save_meta(meta)
+        # Drop heavy frame from preview response
+        result.pop("dataframe", None)
         return result
 
-    # Apply
-    applied = handler(
-        df,
-        meta=meta,
-        mapping=mapping,
-        column=column,
-        new_column=new_column,
-        threshold=threshold,
-        fill_value=fill_value,
-        rename_to=rename_to,
-        apply=True,
-    )
+    # Apply — re-run so we have a fresh dataframe
+    if op == "plan":
+        from api.services import session_mutate
+
+        applied = session_mutate.execute_steps(
+            df, plan or [], mapping=mapping, protected_drop=_PROTECTED_DROP
+        )
+    else:
+        handler = {
+            "strip_time": _op_strip_time,
+            "add_invoice_flag": _op_add_invoice_flag,
+            "drop_column": _op_drop_column,
+            "rename_column": _op_rename_column,
+            "cast_numeric": _op_cast_numeric,
+            "fill_constant": _op_fill_constant,
+        }[op]
+        applied = handler(
+            df,
+            meta=meta,
+            mapping=mapping,
+            column=column,
+            new_column=new_column,
+            threshold=threshold,
+            fill_value=fill_value,
+            rename_to=rename_to,
+            apply=True,
+        )
     if not applied.get("ok"):
         return applied
     try:
@@ -260,14 +308,32 @@ def preview_or_apply(
         }
     from api.services import upload_store
 
+    if applied.get("mapping") is not None:
+        meta.column_mapping = applied["mapping"]
     meta.pending_transform = None
     upload_store.save_meta(meta)
-    out = {k: v for k, v in applied.items() if k != "dataframe"}
+    # Never return mapping (may contain *_id keys) or dataframe to tool callers.
+    out = {
+        k: v
+        for k, v in applied.items()
+        if k not in {"dataframe", "mapping"}
+    }
     out["ok"] = True
     out["mutated"] = True
     out["preview_only"] = False
-    out["message_en"] = applied.get("apply_en") or "Transform applied to the session file."
-    out["message_ar"] = applied.get("apply_ar") or "التحويل اتطبّق على ملف الجلسة."
+    out["message_en"] = (
+        applied.get("apply_en")
+        or result.get("apply_en")
+        or "Transform applied to the session file."
+    )
+    out["message_ar"] = (
+        applied.get("apply_ar")
+        or result.get("apply_ar")
+        or "التحويل اتطبّق على ملف الجلسة."
+    )
+    if op == "plan" and result.get("preview_en"):
+        out["message_en"] = result["apply_en"]
+        out["message_ar"] = result["apply_ar"]
     out["refresh_hint"] = "reload_profile_cleaning_dashboard"
     return out
 
@@ -699,195 +765,30 @@ def _op_fill_constant(
     return preview
 
 
-_BARE_CONFIRM = frozenset(
-    {
-        "apply",
-        "do it",
-        "confirm",
-        "yes",
-        "ok",
-        "طبّق",
-        "طبق",
-        "نفّذ",
-        "نفذ",
-        "موافق",
-        "أيوه",
-        "ايوه",
-        "تمام",
-    }
-)
-
-
-def _threshold_from_question(q: str, *, default: float = 1000.0) -> float:
-    """Prefer a number near comparison words; else default (avoid years/counts)."""
-    compact = q.replace(",", "")
-    near = re.search(
-        r"(?:[><≥≤]|أكبر من|اكبر من|أكبر|اكبر|فوق|أكثر من|اكثر من|"
-        r"above|greater than|over|more than|at least|>=|>)\s*"
-        r"(\d+(?:\.\d+)?)",
-        compact,
-        re.I,
-    )
-    if near:
-        return float(near.group(1))
-    trailing = re.search(
-        r"(\d+(?:\.\d+)?)\s*(?:جنيه|جنية|EGP|GBP|USD|EUR|SAR|AED)?\s*$",
-        compact,
-        re.I,
-    )
-    if trailing:
-        return float(trailing.group(1))
-    # Explicit thousand words without digits
-    if any(k in q for k in ("ألف", "الف", "thousand")):
-        return 1000.0
-    return default
-
-
 def parse_transform_intent(
-    question: str, *, pending: dict[str, Any] | None = None
+    question: str,
+    *,
+    pending: dict[str, Any] | None = None,
+    columns: list[str] | None = None,
+    meta: UploadSessionMeta | None = None,
 ) -> dict[str, Any] | None:
-    """Heuristic intent parser for grounded fallback (AR/EN)."""
+    """Compile AR/EN question into a session transform (legacy op or general plan)."""
+    from api.services import session_mutate
+
     q = (question or "").strip()
     if not q:
         return None
-    q_low = q.lower()
 
-    # Bare confirm of a previous preview
-    if pending and q_low in _BARE_CONFIRM:
-        out = dict(pending)
-        out["confirm_apply"] = True
-        return out
+    cols = list(columns or [])
+    if not cols and meta is not None:
+        try:
+            cols = [str(c) for c in _read_source(meta).columns]
+        except Exception:  # noqa: BLE001
+            cols = list((meta.column_mapping or {}).values())
 
-    # Imperative apply cues (exclude op verbs that also describe the transform).
-    apply_words = (
-        "طبّق",
-        "طبق",
-        "نفّذ",
-        "نفذ",
-        "اعمل",
-        "اعملي",
-        "apply",
-        "do it",
-        "please do",
-        "please apply",
-    )
-    wants_apply = any(w in q_low or w in q for w in apply_words)
-    # Explicit strip/add/drop verbs imply apply when paired with a clear op below.
-    imperative_mutate = any(
-        w in q_low or w in q
-        for w in (
-            "شيل الساعة",
-            "امسح الساعة",
-            "إمسح الساعة",
-            "strip time",
-            "remove time",
-            "ضيف عمود",
-            "أضف عمود",
-            "add a column",
-            "add column",
-            "add a boolean",
-            "create a flag",
-        )
-    )
-    wants_apply = wants_apply or imperative_mutate
-
-    # Strip time from dates — require an explicit strip/remove cue + date cue.
-    strip_cue = any(
-        k in q_low or k in q
-        for k in (
-            "شيل الساعة",
-            "امسح الساعة",
-            "إمسح الساعة",
-            "من غير وقت",
-            "من غير الساعة",
-            "تاريخ فقط",
-            "date only",
-            "strip time",
-            "remove time",
-            "without time",
-            "time of day",
-            "hour from",
-            "from timestamp",
-        )
-    )
-    date_cue = any(
-        k in q_low or k in q
-        for k in ("تاريخ", "date", "datetime", "timestamp", "invoice date", "تاريخ الفاتور")
-    )
-    if strip_cue and date_cue:
-        return {"op": "strip_time", "confirm_apply": wants_apply}
-
-    # Invoice flag / boolean column — need column/flag language + value comparison.
-    col_cue = any(
-        k in q_low or k in q
-        for k in (
-            "عمود",
-            "column",
-            "flag",
-            "boolean",
-            "true/false",
-            "true false",
-            "علم",
-        )
-    )
-    value_cue = any(
-        k in q_low or k in q
-        for k in (
-            "أكبر",
-            "اكبر",
-            "فوق",
-            "أكثر",
-            "اكثر",
-            "above",
-            "greater",
-            "over ",
-            "more than",
-            ">",
-            "1000",
-            "ألف",
-            "الف",
-        )
-    )
-    invoice_cue = any(k in q_low or k in q for k in ("فاتور", "invoice", "order total", "إجمالي"))
-    if col_cue and value_cue and (invoice_cue or "true" in q_low):
-        thr = _threshold_from_question(q, default=1000.0)
-        new_col = None
-        named = re.search(
-            r"(?:اسمه|اسمها|name(?:d)?|called)\s+[\"']?([A-Za-z0-9_\u0600-\u06FF]+)[\"']?",
-            q,
-            re.I,
-        )
-        if named:
-            new_col = named.group(1)
-        return {
-            "op": "add_invoice_flag",
-            "threshold": thr,
-            "new_column": new_col,
-            "confirm_apply": wants_apply,
-        }
-
-    if any(k in q_low for k in ("drop column", "delete column", "remove column")) or (
-        any(k in q for k in ("امسح عمود", "احذف عمود", "شيل عمود"))
-    ):
-        quoted = re.search(r"[\"']([^\"']+)[\"']", q)
-        return {
-            "op": "drop_column",
-            "column": quoted.group(1) if quoted else None,
-            "confirm_apply": wants_apply,
-        }
-
-    # Rename only when both sides are present (avoid intercepting vague "rename" asks).
-    rename_m = re.search(
-        r"(?:rename|سمّي|سمي)\s+[\"']?([^\"'\s]+)[\"']?\s+(?:to|→|->|ل|إلى|الى)\s+[\"']?([^\"'\s]+)[\"']?",
-        q,
-        re.I,
-    )
-    if rename_m:
-        return {
-            "op": "rename_column",
-            "column": rename_m.group(1),
-            "rename_to": rename_m.group(2),
-            "confirm_apply": wants_apply,
-        }
-
-    return None
+    planned = session_mutate.compile_plan(q, columns=cols, pending=pending)
+    if planned is None:
+        return None
+    if planned.get("op") == "refuse":
+        return planned
+    return planned

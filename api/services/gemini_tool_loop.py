@@ -29,12 +29,15 @@ OPEN_ASSISTANT_SYSTEM = """You are MarketMind, a senior retail data analyst for 
 Answer in the user's language (Egyptian-friendly Arabic if lang=ar, else concise English).
 
 You may call approved analytics tools to fetch server-computed facts for THIS upload only.
-You may also preview/apply allowlisted data transforms on the temporary upload session file:
-- strip_time: remove time-of-day from date/timestamp columns (keep calendar date)
-- add_invoice_flag: add a true/false column when invoice total (or row amount) exceeds a threshold
-- drop_column / rename_column / cast_numeric / fill_constant (with safety limits)
-Workflow: call preview_data_transform first; call apply_data_transform with confirm_apply=true
-only when the user clearly asked to apply/do it (e.g. شيل الساعة، ضيف عمود، apply, do it).
+You may reshape the temporary upload session file with preview_data_transform / apply_data_transform.
+Prefer op="plan" with steps for any reasonable in-file command (filter, sort, assign new columns
+from constrained expressions, replace, split/merge, floor dates, strip time, fillna, cast,
+rename, drop non-critical cols, parse_currency, groupby_agg, dedupe, clip).
+Expressions may use column names and + - * / comparisons and whitelisted helpers only —
+never arbitrary Python, shell, network, demo data, or model training.
+Workflow: preview first; apply_data_transform with confirm_apply=true only when the user
+clearly asked to apply (طبّق / apply / do it / imperative reshape).
+Refuse only truly out-of-scope asks; otherwise execute within this file.
 Never invent numbers, product names, forecasts, or causes. Use only tool results for file-specific claims.
 If a request is ambiguous, ask one short clarifying question.
 If data is missing, say what is missing and suggest the next useful step.
@@ -346,13 +349,22 @@ def grounded_tool_answer(
     from api.services import data_transforms as _dx
 
     parsed = _dx.parse_transform_intent(
-        question, pending=getattr(meta, "pending_transform", None)
+        question, pending=getattr(meta, "pending_transform", None), meta=meta
     )
-    if parsed:
+    if parsed and parsed.get("op") == "refuse":
+        parts.append(
+            parsed.get("message_ar") if ar else parsed.get("message_en") or ""
+        )
+    elif parsed:
         tool_name = (
             "apply_data_transform" if parsed.get("confirm_apply") else "preview_data_transform"
         )
-        args = {k: v for k, v in parsed.items() if k != "confirm_apply" and v is not None}
+        args = {
+            k: v
+            for k, v in parsed.items()
+            if k not in {"confirm_apply", "error_code", "message_en", "message_ar"}
+            and v is not None
+        }
         if parsed.get("confirm_apply"):
             args["confirm_apply"] = True
         r = use(tool_name, args)
