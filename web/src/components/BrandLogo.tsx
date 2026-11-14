@@ -9,8 +9,8 @@ type Props = {
 };
 
 /** MarketMind wordmark + chart-mind mark. */
-export function BrandLogo({ href = "/upload", compact = false }: Props) {
-  const { t, lang } = useLang();
+export function BrandLogo({ href = "/", compact = false }: Props) {
+  const { t } = useLang();
   return (
     <Link href={href} className={`brand${compact ? " brand-compact" : ""}`} aria-label={t("brand")}>
       <span className="brand-mark" aria-hidden>
@@ -34,13 +34,7 @@ export function BrandLogo({ href = "/upload", compact = false }: Props) {
       </span>
       <span className="brand-word">
         <span className="brand-name">{t("brand")}</span>
-        {!compact && (
-          <span className="brand-tag">
-            {lang === "ar"
-              ? "Retail Intelligence · مصر والشرق الأوسط"
-              : "Retail Intelligence · مصر والشرق الأوسط"}
-          </span>
-        )}
+        {!compact && <span className="brand-tag">Retail Intelligence</span>}
       </span>
     </Link>
   );
