@@ -47,7 +47,7 @@
     "rmse": 3290.6948686622977,
     "r2": -0.005548100963638669
   },
-  "currency_label": "GBP (\u00a3)",
+  "currency_label": "GBP (£)",
   "currency_confirmed": true,
   "feature_order": [
     "recency",
@@ -80,7 +80,7 @@
   },
   "k_selection": {
     "selected_k": 2,
-    "selection_rule": "Maximize training silhouette, then prefer larger min_cluster_size. k=2 wins on silhouette (see kmeans_diagnostics.csv). k=3 kept as sensitivity only \u2014 not forced for more personas.",
+    "selection_rule": "Maximize training silhouette, then prefer larger min_cluster_size. k=2 wins on silhouette (see kmeans_diagnostics.csv). k=3 kept as sensitivity only — not forced for more personas.",
     "comparisons": [
       {
         "k": 2,
@@ -173,15 +173,16 @@
   },
   "notes": [
     "Segment names are descriptive labels from RFM profile medians; not approved personas.",
-    "Segment actions are provisional heuristics only (D7); actions_approved=false \u2014 not approved business policy.",
-    "Eligible-spend policy (D5): cancellations matching conservative C#### / C-\u2026 (is_cancellation_invoice) and non-positive quantities excluded; target is eligible positive spend, not net revenue after refunds.",
-    "Currency (D6): GBP (\u00a3) per UCI dataset description; no FX conversion; currency_confirmed=true.",
-    "Deployment (D1/D8): preferred host Streamlit Community Cloud (PDF); public publish not approved until a live URL exists.",
+    "Segment actions are provisional heuristics only (D7); actions_approved=false — not approved business policy.",
+    "Eligible-spend policy (D5): cancellations matching conservative C#### / C-… (is_cancellation_invoice) and non-positive quantities excluded; target is eligible positive spend, not net revenue after refunds.",
+    "Currency (D6): GBP (£) per UCI dataset description; no FX conversion; currency_confirmed=true.",
+    "Deployment (D1/D8): Streamlit Community Cloud live at https://marketmind-grad.streamlit.app/; LinkedIn unpublished.",
     "Do not load these joblib files from untrusted sources."
   ],
   "deployment": {
     "preferred_host": "streamlit_community_cloud",
-    "public_publish_approved": false,
-    "note": "D1 preference Streamlit Community Cloud (PDF); D8 publish not approved \u2014 do not record a public URL until the Cloud app is live and checked."
+    "public_publish_approved": true,
+    "note": "D8 Streamlit Community Cloud publish approved and live; LinkedIn/CV still unpublished.",
+    "public_url": "https://marketmind-grad.streamlit.app/"
   }
 }

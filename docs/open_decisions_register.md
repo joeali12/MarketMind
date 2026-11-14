@@ -11,7 +11,7 @@ Status values: `TBD`, `Proposed (pending approval)`, `Resolved`, `Blocked`.
 | D5 | Returns/cancellations in target | **Resolved (user)** | Eligible spend excludes cancellation invoices matching conservative `C####` / `C-…` (`is_cancellation_invoice`) and non-positive quantities. Target is **eligible positive spend**, not net revenue after refunds. Cancellations remain tagged in the cleaned store for EDA. | No |
 | D6 | Currency label | **Resolved (user)** | Display **GBP (£)** per UCI dataset description. No currency conversion. `currency_confirmed=true`. | No |
 | D7 | Segment action mapping | **Resolved (user constraint)** | Keep marketing actions as **provisional heuristics** only. `actions_approved` stays **false**. Do not present as approved business policy. | No |
-| D8 | Publish publicly / LinkedIn | **Resolved (not live)** | Streamlit public publish is required by the course PDF but **not executed yet** — `public_publish_approved` stays **false** until a real `*.streamlit.app` URL is created and checked. LinkedIn / CV drafts stay unpublished. | No — create Cloud app when ready |
+| D8 | Publish publicly / LinkedIn | **Resolved (Streamlit live)** | Streamlit Community Cloud academic app is live at https://marketmind-grad.streamlit.app/ (`public_publish_approved=true`). LinkedIn / CV drafts stay unpublished. | No |
 
 ## Segmentation k (reviewed)
 

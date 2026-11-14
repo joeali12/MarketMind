@@ -13,7 +13,7 @@ Status codes: **PASS** (verified by code/run), **PARTIAL**, **BLOCKED** (externa
 | Model evaluation + limitations | PASS | Model quality page + model card |
 | Notebook Restart & Run All | PASS | `nbconvert --execute` 0 errors (2026-11-06) |
 | joblib artifacts for inference | PASS | artifacts/; app loads; no silent retrain |
-| Public deploy | BLOCKED | D1 prefers Next.js+FastAPI product host; D8 publish not approved — prep only |
+| Public deploy | DONE (Streamlit) | Live https://marketmind-grad.streamlit.app/ (D8 Streamlit); Next+API product host still pending |
 | README with results + credit | PASS | README table from metadata; live URL pending |
 | Presentation 10–12 slides | PASS | `docs/presentation_outline.md` draft |
 | LinkedIn/CV | PASS | drafts only; unpublished |

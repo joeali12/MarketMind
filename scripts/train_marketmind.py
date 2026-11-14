@@ -343,8 +343,8 @@ def main() -> int:
         "currency_confirmed": CURRENCY_CONFIRMED,
         "deployment": {
             "preferred_host": PREFERRED_DEPLOY_HOST,
-            "public_publish_approved": False,
-            "note": "D1 preference set; D8 publish not approved — do not deploy externally.",
+            "public_publish_approved": True,
+            "note": "D8 Streamlit Community Cloud publish approved and live; LinkedIn/CV still unpublished.",
         },
         "feature_order": list(REGRESSION_FEATURE_COLS),
         "sklearn_version": sklearn.__version__,
@@ -369,7 +369,7 @@ def main() -> int:
             "Segment actions are provisional heuristics only (D7); actions_approved=false — not approved business policy.",
             "Eligible-spend policy (D5): cancellations starting with C and non-positive quantities excluded; target is eligible positive spend, not net revenue after refunds.",
             "Currency (D6): GBP (£) per UCI dataset description; no FX conversion; currency_confirmed=true.",
-            "Deployment (D1/D8): preferred host Streamlit Community Cloud; public publish not approved.",
+            "Deployment (D1/D8): Streamlit Community Cloud live at https://marketmind-grad.streamlit.app/; LinkedIn unpublished.",
             "Do not load these joblib files from untrusted sources.",
         ],
     }

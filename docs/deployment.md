@@ -4,7 +4,7 @@
 
 **This PDF app is Streamlit only.** Entrypoint: `app.py` at the repository root. The Next.js/FastAPI UI is not the Cloud app.
 
-**D8:** Streamlit Community Cloud is approved. LinkedIn and CV drafts stay unpublished. Secrets stay empty.
+**D8:** Streamlit Community Cloud publish approved and live. LinkedIn and CV drafts stay unpublished. Secrets stay empty.
 
 ## What Cloud must install
 
@@ -42,7 +42,7 @@ Not part of this deploy set: the raw UCI workbook, `data/processed/transactions_
 
 ## Smoke checklist after a real URL exists
 
-- [ ] Home loads without asking for the raw workbook
+- [x] Home loads without asking for the raw workbook
 - [ ] Data validation shows the quality summary
 - [ ] Overview shows customer-table counts
 - [ ] Groups shows the PCA scatter

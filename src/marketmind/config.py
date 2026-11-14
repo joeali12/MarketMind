@@ -78,7 +78,7 @@ CURRENCY_CONFIRMED: bool = True
 # Marketing actions remain provisional heuristics (D7); never flip without user approval.
 ACTIONS_APPROVED: bool = False
 
-# Preferred PDF deploy host (D1); public publish not approved until a live URL exists (D8).
+# Preferred PDF deploy host (D1); Streamlit public publish approved and live (D8).
 PREFERRED_DEPLOY_HOST: str = "streamlit_community_cloud"
 
 # ---------------------------------------------------------------------------
