@@ -14,6 +14,22 @@
   font-display: swap;
 }
 
+@font-face {
+  font-family: "FormaDJRArabic";
+  src: url("/fonts/FormaDJRArabicBanner-Medium.otf") format("opentype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "EYENAmmon";
+  src: url("/fonts/EYENAmmon-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   /* Stitch-aligned MarketMind tokens (ui-ux-pro-max: data-dense, light) */
   --navy: #0b1c30;
@@ -36,9 +52,9 @@
   --shadow: 0 1px 3px rgba(11, 28, 48, 0.04), 0 10px 25px -5px rgba(11, 28, 48, 0.03);
   --font-en: "Segoe UI", Helvetica, Arial, sans-serif;
   --font-en-display: "Nevanta", "Daltown", "Segoe UI", Helvetica, Arial, sans-serif;
-  /* Cairo via next/font (--font-cairo) — bold, clear Arabic UI */
-  --font-ar-body: var(--font-cairo), "Segoe UI", Tahoma, sans-serif;
-  --font-ar-display: var(--font-cairo), "Segoe UI", Tahoma, sans-serif;
+  /* Local Arabic faces (no next/font Google fetch — CI-safe) */
+  --font-ar-body: "FormaDJRArabic", "Segoe UI", Tahoma, sans-serif;
+  --font-ar-display: "EYENAmmon", "FormaDJRArabic", "Segoe UI", Tahoma, sans-serif;
   --header-h: 72px;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in: cubic-bezier(0.4, 0, 1, 1);

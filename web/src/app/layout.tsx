@@ -1,17 +1,8 @@
 import type { Metadata } from "next";
-import { Cairo } from "next/font/google";
 import { LangProvider } from "@/context/LangContext";
 import { DataSourceProvider } from "@/context/DataSourceContext";
 import { LangChrome } from "@/components/LangChrome";
 import "./globals.css";
-
-/** Bold, clear Arabic UI face — premium geometric sans (not Inter). */
-const cairo = Cairo({
-  subsets: ["arabic", "latin"],
-  weight: ["500", "600", "700", "800"],
-  variable: "--font-cairo",
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   title: "MarketMind — Retail Intelligence",
@@ -24,7 +15,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="ar" dir="rtl" className={cairo.variable} suppressHydrationWarning>
+    <html lang="ar" dir="rtl" suppressHydrationWarning>
       <body className="chat-shell-body">
         <LangProvider>
           <DataSourceProvider>
