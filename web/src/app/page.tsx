@@ -32,8 +32,6 @@ const COPY = {
     whyTitle: "ليه المشروع مهم",
     whyLead:
       "متاجر مصر والمنطقة تملك بيانات يومية، لكن التحليل غالباً معقد أو مبني لأسواق أخرى.",
-    whyBody:
-      "MarketMind مشروع تخرج يقرّب ذكاء التجزئة: RFM، تجزئة K-Means، وتقدير إنفاق مؤهل خلال ٩٠ يوماً — بواجهة ثنائية اللغة تبدأ من ملفك.",
     finalTitle: "جاهز تجرب على بياناتك؟",
     finalCta: "يلا جرب",
   },
@@ -65,8 +63,6 @@ const COPY = {
     whyTitle: "Why it matters",
     whyLead:
       "Retailers across Egypt and the region sit on daily sales data, but analytics are often heavy or built for other markets.",
-    whyBody:
-      "MarketMind is a graduation product that brings retail intelligence closer: RFM, K-Means segments, and eligible spend in the next 90 days — bilingual UI that starts from your file.",
     finalTitle: "Ready to try it on your data?",
     finalCta: "يلا جرب",
   },
@@ -183,7 +179,6 @@ export default function HomePage() {
             {t.whyTitle}
           </h2>
           <p className="landing-section-lead">{t.whyLead}</p>
-          <p className="landing-why-body">{t.whyBody}</p>
         </div>
       </section>
 

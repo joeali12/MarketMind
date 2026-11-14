@@ -2005,15 +2005,6 @@ html[dir="rtl"] .landing-brand {
   max-width: 40rem;
 }
 
-.landing-why-body {
-  margin: calc(var(--landing-space) * 1.25) auto 0;
-  text-align: center;
-  line-height: 1.7;
-  color: var(--navy);
-  font-size: 1.0625rem;
-  max-width: 36rem;
-}
-
 .landing-final {
   text-align: center;
   padding: calc(var(--landing-space) * 4) calc(var(--landing-space) * 1.5)
