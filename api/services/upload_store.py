@@ -60,6 +60,8 @@ class UploadSessionMeta:
     analysis_currency_filter: str | None = None
     # Cleaning proposal ids the user accepted for this session (dashboard/export).
     accepted_cleaning_ids: list | None = None
+    # Last previewed assistant transform waiting for «طبّق» / apply.
+    pending_transform: dict | None = None
 
 
 def _session_dir(session_id: str) -> Path:

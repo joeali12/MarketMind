@@ -578,6 +578,82 @@ def _analytics_only_grounded(
     }
 
 
+def _is_session_transform_turn(question: str, meta: UploadSessionMeta | None) -> bool:
+    if meta is None:
+        return False
+    from api.services import data_transforms as _dx
+
+    parsed = _dx.parse_transform_intent(
+        question, pending=getattr(meta, "pending_transform", None), meta=meta
+    )
+    # Refuse messages still count as a transform turn (do not fall through to cleaning).
+    return bool(parsed)
+
+
+def _transform_turn_result(
+    *,
+    question: str,
+    lang: str,
+    meta: UploadSessionMeta | None,
+    history: list[dict[str, str]] | None,
+    profile: dict[str, Any],
+    analytics: dict[str, Any] | None,
+    status: dict[str, Any],
+    citations: list[dict[str, Any]],
+    ar: bool,
+) -> dict[str, Any]:
+    """Run a session transform via the open-ended path and return a full answer payload."""
+    open_result = _open_ended_analytics_turn(
+        question=question,
+        lang=lang,
+        meta=meta,
+        history=history,
+        profile=profile,
+        analytics=analytics,
+    )
+    answer_en = open_result["answer_en"]
+    answer_ar = open_result["answer_ar"]
+    citations = list(citations) + list(open_result.get("citations") or [])
+    result = {
+        "mode": open_result.get("mode", "grounded_facts"),
+        "adapter_invoked": bool(open_result.get("adapter_invoked")),
+        "provider_label_en": open_result.get("provider_label_en") or status["label_en"],
+        "provider_label_ar": open_result.get("provider_label_ar") or status["label_ar"],
+        "question": question,
+        "answer_en": answer_en,
+        "answer_ar": answer_ar,
+        "answer": answer_ar if ar else answer_en,
+        "citations": citations,
+        "actions": open_result.get("actions") or [],
+        "quick_replies": list(open_result.get("quick_replies") or []),
+        "unsupported": False,
+        "gemini_safe_intent": open_result.get("gemini_safe_intent"),
+        "tools_called": open_result.get("tools_called") or [],
+        "data_mutated": bool(open_result.get("data_mutated")),
+        "session_id": profile.get("session_id") or (meta.session_id if meta else None),
+        "demo": False,
+        "raw_rows_sent_externally": False,
+        "raw_user_question_sent_externally": False,
+        "fallback_used": bool(open_result.get("fallback_used")),
+        "privacy_disclosure_en": (
+            "When AI assist is on, your question may be sent to Google’s Gemini API "
+            "with server-computed aggregates only — never raw transaction rows or personal IDs."
+        ),
+        "privacy_disclosure_ar": (
+            "لما المساعدة الذكية تكون شغالة، سؤالك ممكن يتبعت لـ Gemini من Google "
+            "مع مجاميع محسوبة من السيرفر فقط — من غير صفوف خام أو أرقام شخصية."
+        ),
+    }
+    if open_result.get("fallback_reason_en"):
+        result["fallback_reason_en"] = open_result["fallback_reason_en"]
+        result["fallback_reason_ar"] = open_result.get("fallback_reason_ar")
+    if open_result.get("fallback_code"):
+        result["fallback_code"] = open_result["fallback_code"]
+    if open_result.get("gemini_skip_reason"):
+        result["gemini_skip_reason"] = open_result["gemini_skip_reason"]
+    return result
+
+
 def _open_ended_analytics_turn(
     *,
     question: str,
@@ -595,6 +671,40 @@ def _open_ended_analytics_turn(
     safe_history = _scrub_history(history)
     block = gemini_intents.user_text_blocks_provider(question)
     if block:
+        # Still honor safe transform commands locally (no Gemini / no raw rows out).
+        from api.services import data_transforms as _dx
+
+        if meta is not None and _dx.parse_transform_intent(
+            question, pending=getattr(meta, "pending_transform", None), meta=meta
+        ):
+            grounded = gemini_tool_loop.grounded_tool_answer(
+                question=question, lang=lang, meta=meta
+            )
+            answer = grounded.get("answer") or ""
+            return {
+                "answer_en": answer,
+                "answer_ar": answer,
+                "mode": "grounded_facts",
+                "adapter_invoked": False,
+                "fallback_used": True,
+                "fallback_code": block,
+                "gemini_skip_reason": block,
+                "tools_called": grounded.get("tools_called") or [],
+                "data_mutated": bool(grounded.get("mutated")),
+                "quick_replies": [
+                    "طبّق" if ar else "apply",
+                    "قارن الشهر ده باللي قبله" if ar else "compare this month to last",
+                ],
+                "provider_label_en": status["label_en"],
+                "provider_label_ar": status["label_ar"],
+                "citations": [],
+                "actions": (
+                    [{"type": "refresh_after_mutation"}]
+                    if grounded.get("mutated")
+                    else []
+                ),
+                "raw_user_question_sent_externally": False,
+            }
         msg_en = (
             "I can’t send that question to AI assist because it looks like it may include "
             "identifiers or pasted rows. Rephrase without IDs/emails/phones, or ask about aggregates."
@@ -629,6 +739,44 @@ def _open_ended_analytics_turn(
         )
         grounded["raw_user_question_sent_externally"] = False
         return grounded
+
+    # Deterministic session transforms take priority over Gemini so clear
+    # commands (strip time, add invoice flag, …) never get refused/clarified away.
+    from api.services import data_transforms as _dx
+
+    if meta is not None and _dx.parse_transform_intent(
+        question, pending=getattr(meta, "pending_transform", None), meta=meta
+    ):
+        grounded = gemini_tool_loop.grounded_tool_answer(
+            question=question, lang=lang, meta=meta
+        )
+        answer = grounded.get("answer") or ""
+        return {
+            "answer_en": answer,
+            "answer_ar": answer,
+            "mode": "grounded_facts",
+            "adapter_invoked": False,
+            "fallback_used": False,
+            "tools_called": grounded.get("tools_called") or [],
+            "data_mutated": bool(grounded.get("mutated")),
+            "quick_replies": [
+                "طبّق" if ar else "apply",
+                "شيل الساعة من التاريخ" if ar else "strip time from dates",
+                "رتب حسب InvoiceDate" if ar else "sort by InvoiceDate",
+                "ضيف عمود high = Quantity * Price > 500"
+                if ar
+                else "add column high = Quantity * Price > 500",
+            ],
+            "provider_label_en": "MarketMind (session transforms)",
+            "provider_label_ar": "مساعد MarketMind (تحويلات الجلسة)",
+            "citations": [],
+            "actions": (
+                [{"type": "refresh_after_mutation"}]
+                if grounded.get("mutated")
+                else []
+            ),
+            "raw_user_question_sent_externally": False,
+        }
 
     loop = gemini_tool_loop.run_tool_assisted_turn(
         question=question,
@@ -870,6 +1018,20 @@ def answer(
             "لسه مش هخترعلك رقم زبون أو تاريخ."
         )
         quick = ["show cleaning" if not ar else "ورّيني التنظيف"]
+
+    # --- Session transforms (before cleaning «apply» / «طبّق») ---
+    elif _is_session_transform_turn(q, meta):
+        return _transform_turn_result(
+            question=q,
+            lang=lang,
+            meta=meta,
+            history=history,
+            profile=profile,
+            analytics=analytics,
+            status=status,
+            citations=citations,
+            ar=ar,
+        )
 
     # --- Show / walk cleaning ---
     elif re.search(

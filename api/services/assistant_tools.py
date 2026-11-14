@@ -633,6 +633,66 @@ def tool_restore_pre_safe_fill(meta: UploadSessionMeta, args: dict[str, Any]) ->
     )
 
 
+def tool_preview_data_transform(meta: UploadSessionMeta, args: dict[str, Any]) -> dict[str, Any]:
+    """Preview a session-file transform / plan (aggregates only)."""
+    from api.services import data_transforms
+
+    plan = args.get("plan")
+    if isinstance(plan, str):
+        try:
+            import json
+
+            plan = json.loads(plan)
+        except Exception:  # noqa: BLE001
+            plan = None
+    result = data_transforms.preview_or_apply(
+        meta,
+        op=str(args.get("op") or ""),
+        confirm_apply=False,
+        column=args.get("column"),
+        new_column=args.get("new_column"),
+        threshold=args.get("threshold"),
+        fill_value=args.get("fill_value"),
+        rename_to=args.get("rename_to"),
+        plan=plan if isinstance(plan, list) else None,
+    )
+    result["tool"] = "preview_data_transform"
+    return result
+
+
+def tool_apply_data_transform(meta: UploadSessionMeta, args: dict[str, Any]) -> dict[str, Any]:
+    """Apply a session-file transform / plan after explicit confirmation."""
+    from api.services import data_transforms
+
+    if not bool(args.get("confirm_apply")):
+        return _err(
+            "confirm_required",
+            en="Set confirm_apply=true only after the user clearly asked to apply the transform.",
+            ar="ضع confirm_apply=true فقط بعد طلب صريح بتطبيق التحويل.",
+        )
+    plan = args.get("plan")
+    if isinstance(plan, str):
+        try:
+            import json
+
+            plan = json.loads(plan)
+        except Exception:  # noqa: BLE001
+            plan = None
+    result = data_transforms.preview_or_apply(
+        meta,
+        op=str(args.get("op") or ""),
+        confirm_apply=True,
+        column=args.get("column"),
+        new_column=args.get("new_column"),
+        threshold=args.get("threshold"),
+        fill_value=args.get("fill_value"),
+        rename_to=args.get("rename_to"),
+        plan=plan if isinstance(plan, list) else None,
+    )
+    result["tool"] = "apply_data_transform"
+    return result
+
+
 TOOL_HANDLERS: dict[str, Callable[[UploadSessionMeta, dict[str, Any]], dict[str, Any]]] = {
     "get_upload_profile": tool_get_upload_profile,
     "get_sales_kpis": tool_get_sales_kpis,
@@ -644,6 +704,8 @@ TOOL_HANDLERS: dict[str, Callable[[UploadSessionMeta, dict[str, Any]], dict[str,
     "get_cleaning_impact": tool_get_cleaning_impact,
     "apply_safe_fills": tool_apply_safe_fills,
     "restore_pre_safe_fill": tool_restore_pre_safe_fill,
+    "preview_data_transform": tool_preview_data_transform,
+    "apply_data_transform": tool_apply_data_transform,
 }
 
 
@@ -729,6 +791,64 @@ TOOL_DECLARATIONS: list[dict[str, Any]] = [
                 "confirm_restore": {"type": "boolean"},
             },
             "required": ["confirm_restore"],
+        },
+    },
+    {
+        "name": "preview_data_transform",
+        "description": (
+            "Preview a safe mutation of THIS upload session file only (no write yet). "
+            "Prefer op='plan' with a steps[] list for open-ended reshape requests. "
+            "Step ops: filter, sort, assign (expr), replace, split, merge, floor_date, "
+            "strip_time, fillna, cast, rename, drop, parse_currency, groupby_agg, dedupe, clip. "
+            "Expressions are a constrained DSL (columns, + - * /, comparisons, "
+            "abs/round/lower/year/month/to_number/…) — never arbitrary Python. "
+            "Legacy shortcuts: strip_time, add_invoice_flag, drop_column, rename_column, "
+            "cast_numeric, fill_constant. Returns aggregates only — never raw rows."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "op": {
+                    "type": "string",
+                    "description": (
+                        "plan | strip_time | add_invoice_flag | drop_column | "
+                        "rename_column | cast_numeric | fill_constant"
+                    ),
+                },
+                "plan": {
+                    "type": "array",
+                    "description": "For op=plan: list of {op, ...} step objects",
+                    "items": {"type": "object"},
+                },
+                "column": {"type": "string"},
+                "new_column": {"type": "string"},
+                "threshold": {"type": "number"},
+                "fill_value": {"type": "string"},
+                "rename_to": {"type": "string"},
+            },
+            "required": ["op"],
+        },
+    },
+    {
+        "name": "apply_data_transform",
+        "description": (
+            "Apply a previewed session-file plan/transform after the user clearly asked "
+            "(apply / طبّق / do it). Requires confirm_apply=true. Session backup first. "
+            "Scope: this temporary upload only — no demo data, shell, network, or model training."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "op": {"type": "string"},
+                "confirm_apply": {"type": "boolean"},
+                "plan": {"type": "array", "items": {"type": "object"}},
+                "column": {"type": "string"},
+                "new_column": {"type": "string"},
+                "threshold": {"type": "number"},
+                "fill_value": {"type": "string"},
+                "rename_to": {"type": "string"},
+            },
+            "required": ["op", "confirm_apply"],
         },
     },
 ]
