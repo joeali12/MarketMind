@@ -28,7 +28,7 @@ def test_metadata_matches_resolved_decisions_and_keeps_metrics():
     assert "eligible positive spend" in meta["eligible_spend_policy"].lower()
     assert "not net revenue" in meta["eligible_spend_policy"].lower()
     assert meta["deployment"]["preferred_host"] == "streamlit_community_cloud"
-    assert meta["deployment"]["public_publish_approved"] is False
+    assert meta["deployment"]["public_publish_approved"] is True
     # Verified held-out metrics must remain intact
     assert abs(meta["test_metrics"]["mae"] - 452.1043604769556) < 1e-9
     assert abs(meta["test_metrics"]["rmse"] - 2650.9479236140055) < 1e-9

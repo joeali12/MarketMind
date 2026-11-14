@@ -35,7 +35,7 @@ Academic demonstration for SME retail prioritization education. Not a commercial
 - Historical 2009–2011 behavior may not transfer
 - High zero-target rates; skewed spend
 - Segment actions are **provisional heuristics only** (`actions_approved=false`; D7) — not approved policy
-- Public deploy not approved (D1 preference: Streamlit Community Cloud; D8)
+- Streamlit Community Cloud live: https://marketmind-grad.streamlit.app/ (D8); LinkedIn unpublished
 - joblib artifacts are version-sensitive; load only project-trusted files
 
 ## Ethical notes
