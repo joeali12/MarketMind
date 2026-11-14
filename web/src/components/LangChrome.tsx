@@ -78,11 +78,6 @@ export function LangChrome() {
                 : ""}
             </span>
           )}
-          {onLanding && (
-            <Link href="/upload" className="btn btn-cta btn-sm lang-chrome-cta">
-              يلا جرب
-            </Link>
-          )}
           <div className="lang-switch" role="group" aria-label="Language">
             <button
               type="button"
