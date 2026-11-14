@@ -172,6 +172,63 @@ def test_parse_transform_intent_english():
     assert flag["threshold"] == 1000.0
 
 
+def test_parse_strip_time_spoken_arabic_and_english():
+    """Spoken AR/EN strip-time must compile even without LLM (heuristic fallback)."""
+    from api.services import data_transforms as dx
+
+    cols = ["Invoice", "Quantity", "Price", "InvoiceDate"]
+    cases = [
+        "شيل الوقت بالساعات في التاريخ",
+        "في عمود التاريخ شيل الوقت اللي هو بالساعات",
+        "امسح الوقت من التاريخ",
+        "strip hours from the date",
+        "remove the time from dates",
+        "Please remove the hours from the InvoiceDate column",
+    ]
+    for phrase in cases:
+        parsed = dx.parse_transform_intent(phrase, columns=cols, allow_llm=False)
+        assert parsed and parsed["op"] == "strip_time", phrase
+        assert parsed.get("confirm_apply") is True, phrase
+
+
+def test_llm_compile_plan_sanitizes_strip_time(monkeypatch):
+    from api.services import plan_intent
+
+    monkeypatch.setattr(plan_intent, "gemini_key_configured", lambda: True)
+
+    def fake_llm(question, *, columns=None, lang="en"):
+        return plan_intent._sanitize_plan(
+            {
+                "op": "strip_time",
+                "column": "InvoiceDate",
+                "confirm_apply": True,
+            },
+            columns=list(columns or []),
+        )
+
+    monkeypatch.setattr(plan_intent, "llm_compile_plan", fake_llm)
+    from api.services import data_transforms as dx
+
+    cols = ["Invoice", "Quantity", "Price", "InvoiceDate"]
+    # Force LLM path by using a soft cue that heuristic may miss without allow_llm=False
+    parsed = dx.parse_transform_intent(
+        "خلّي التاريخ من غير الساعات لو سمحت",
+        columns=cols,
+        lang="ar",
+        allow_llm=True,
+    )
+    assert parsed and parsed["op"] == "strip_time"
+    assert parsed.get("confirm_apply") is True
+
+
+def test_soft_reshape_cue_covers_user_screenshot_phrasing():
+    from api.services import plan_intent
+
+    assert plan_intent.soft_reshape_cue("شيل الوقت بالساعات في التاريخ")
+    assert plan_intent.soft_reshape_cue("remove the time from dates")
+    assert not plan_intent.soft_reshape_cue("قارن مبيعات الشهر ده باللي قبله")
+
+
 def test_parse_intent_ignores_weak_and_picks_threshold_near_comparison():
     from api.services import data_transforms as dx
 

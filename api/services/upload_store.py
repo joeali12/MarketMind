@@ -181,6 +181,7 @@ def create_session_streaming(
         byte_size=total,
     )
     _meta_path(sid).write_text(json.dumps(asdict(meta)))
+    _mirror_session(sid)
     logger.info(
         "upload_stored session_hash=%s bytes=%s ext=%s",
         session_id_hash(sid),
@@ -254,6 +255,7 @@ async def create_session_from_upload_file(
         byte_size=total,
     )
     _meta_path(sid).write_text(json.dumps(asdict(meta)))
+    _mirror_session(sid)
     logger.info(
         "upload_stored session_hash=%s bytes=%s ext=%s",
         session_id_hash(sid),
@@ -277,6 +279,7 @@ def _write_new_session(filename: str, ext: str, content: bytes) -> UploadSession
         byte_size=len(content),
     )
     _meta_path(sid).write_text(json.dumps(asdict(meta)))
+    _mirror_session(sid)
     logger.info(
         "upload_stored session_hash=%s bytes=%s ext=%s",
         session_id_hash(sid),
@@ -286,7 +289,34 @@ def _write_new_session(filename: str, ext: str, content: bytes) -> UploadSession
     return meta
 
 
+def _mirror_session(session_id: str) -> None:
+    try:
+        from api.services import session_blob
+
+        session_blob.sync_session_dir(session_id, _session_dir(session_id))
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "blob_mirror_skipped session_hash=%s", session_id_hash(session_id)
+        )
+
+
+def _ensure_local_session(session_id: str) -> None:
+    """Hydrate from durable blob when this isolate has no /tmp copy."""
+    path = _meta_path(session_id)
+    if path.exists():
+        return
+    try:
+        from api.services import session_blob
+
+        session_blob.hydrate_session_dir(session_id, _session_dir(session_id))
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "blob_hydrate_skipped session_hash=%s", session_id_hash(session_id)
+        )
+
+
 def load_meta(session_id: str) -> UploadSessionMeta:
+    _ensure_local_session(session_id)
     path = _meta_path(session_id)
     if not path.exists():
         raise FileNotFoundError("Upload session not found or expired")
@@ -297,22 +327,52 @@ def load_meta(session_id: str) -> UploadSessionMeta:
 
 
 def save_meta(meta: UploadSessionMeta) -> None:
+    ensure_tmp_root()
+    _session_dir(meta.session_id).mkdir(parents=True, exist_ok=True)
     _meta_path(meta.session_id).write_text(json.dumps(asdict(meta)))
+    _mirror_session(meta.session_id)
 
 
 def upload_path(session_id: str) -> Path:
     meta = load_meta(session_id)
     path = _file_path(session_id, meta.extension)
     if not path.exists():
+        # Meta hydrated but file missing — retry full hydrate.
+        _ensure_local_session(session_id)
+        try:
+            from api.services import session_blob
+
+            session_blob.hydrate_session_dir(
+                session_id, _session_dir(session_id), extension=meta.extension
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        path = _file_path(session_id, meta.extension)
+    if not path.exists():
         raise FileNotFoundError("Upload file missing")
     return path
 
 
 def discard_session(session_id: str) -> None:
+    ext: str | None = None
+    meta_file = _meta_path(session_id)
+    if meta_file.exists():
+        try:
+            ext = str(json.loads(meta_file.read_text()).get("extension") or "") or None
+        except (json.JSONDecodeError, TypeError, ValueError):
+            ext = None
     directory = _session_dir(session_id)
     if directory.exists():
         shutil.rmtree(directory, ignore_errors=True)
         logger.info("upload_discard session_hash=%s", session_id_hash(session_id))
+    try:
+        from api.services import session_blob
+
+        session_blob.discard_session_blobs(session_id, extension=ext)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "blob_discard_skipped session_hash=%s", session_id_hash(session_id)
+        )
 
 
 def write_export(session_id: str, content: bytes, name: str = "cleaned.csv") -> Path:

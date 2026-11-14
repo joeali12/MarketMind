@@ -582,9 +582,32 @@ def _is_session_transform_turn(question: str, meta: UploadSessionMeta | None) ->
     if meta is None:
         return False
     from api.services import data_transforms as _dx
+    from api.services import plan_intent, session_mutate
 
+    if getattr(meta, "pending_transform", None) and (question or "").strip().lower() in {
+        "apply",
+        "do it",
+        "confirm",
+        "yes",
+        "ok",
+        "طبّق",
+        "طبق",
+        "نفّذ",
+        "نفذ",
+        "موافق",
+        "أيوه",
+        "ايوه",
+        "تمام",
+    }:
+        return True
+    # Soft bilingual reshape cues → route to LLM/tool transform path (not analytics Q&A).
+    if plan_intent.soft_reshape_cue(question) or session_mutate.looks_like_mutation(question):
+        return True
     parsed = _dx.parse_transform_intent(
-        question, pending=getattr(meta, "pending_transform", None), meta=meta
+        question,
+        pending=getattr(meta, "pending_transform", None),
+        meta=meta,
+        allow_llm=False,
     )
     # Refuse messages still count as a transform turn (do not fall through to cleaning).
     return bool(parsed)

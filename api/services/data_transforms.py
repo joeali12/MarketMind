@@ -771,9 +771,15 @@ def parse_transform_intent(
     pending: dict[str, Any] | None = None,
     columns: list[str] | None = None,
     meta: UploadSessionMeta | None = None,
+    lang: str = "en",
+    allow_llm: bool = True,
 ) -> dict[str, Any] | None:
-    """Compile AR/EN question into a session transform (legacy op or general plan)."""
-    from api.services import session_mutate
+    """Compile AR/EN question into a session transform (legacy op or general plan).
+
+    Prefers Gemini → allowlisted mutate DSL when configured and the ask looks like
+    a file reshape; falls back to deterministic compile_plan.
+    """
+    from api.services import plan_intent, session_mutate
 
     q = (question or "").strip()
     if not q:
@@ -785,6 +791,33 @@ def parse_transform_intent(
             cols = [str(c) for c in _read_source(meta).columns]
         except Exception:  # noqa: BLE001
             cols = list((meta.column_mapping or {}).values())
+
+    # Bare «طبّق» / apply against a pending preview — no LLM needed.
+    bare = {
+        "apply",
+        "do it",
+        "confirm",
+        "yes",
+        "ok",
+        "طبّق",
+        "طبق",
+        "نفّذ",
+        "نفذ",
+        "موافق",
+        "أيوه",
+        "ايوه",
+        "تمام",
+    }
+    if pending and q.lower() in bare:
+        out = dict(pending)
+        out["confirm_apply"] = True
+        return out
+
+    # Prefer LLM understanding for bilingual reshape asks when configured.
+    if allow_llm and plan_intent.soft_reshape_cue(q):
+        llm_plan = plan_intent.llm_compile_plan(q, columns=cols, lang=lang)
+        if llm_plan is not None:
+            return llm_plan
 
     planned = session_mutate.compile_plan(q, columns=cols, pending=pending)
     if planned is None:
