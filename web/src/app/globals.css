@@ -1395,6 +1395,15 @@ th {
     animation: none !important;
   }
 
+  .landing-visual-line {
+    stroke-dashoffset: 0;
+  }
+
+  .landing-visual-bars rect {
+    opacity: 1;
+    transform: none;
+  }
+
   .skeleton {
     background: var(--border-soft);
   }
@@ -1900,6 +1909,8 @@ html[dir="rtl"] .landing-brand {
   font-size: clamp(1.6rem, 3vw, 2.1rem);
   letter-spacing: -0.02em;
   text-align: center;
+  /* Clear sticky .lang-chrome (incl. wrapped mobile nav) on hash jumps */
+  scroll-margin-top: calc(var(--header-h) + 48px);
 }
 
 .landing-section-lead {
