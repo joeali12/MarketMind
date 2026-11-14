@@ -198,30 +198,35 @@ def hydrate_session_dir(
     *,
     extension: str | None = None,
     force: bool = False,
-) -> bool:
+) -> str:
     """Restore session files from blob into ``directory``.
 
-    Returns True if a non-expired meta landed. Expired blob copies are deleted
-    and return False. When ``force`` is True (default for warm isolates), local
-    files are overwritten from blob so another isolate's mutations are visible.
+    Returns a status string:
+    - ``ok`` — non-expired meta applied (or local kept as newer)
+    - ``expired`` — blob meta past TTL; blob discarded
+    - ``missing`` — no blob meta (404 / never mirrored)
+    - ``error`` — transport/parse failure; caller must keep local
+    - ``disabled`` — blob not configured
     """
     if not blob_enabled():
-        return False
+        return "disabled"
     meta_bytes = get_bytes(_pathname(session_id, "meta.json"))
     if not meta_bytes:
-        return False
+        # Distinguish "never stored" from "GET failed" is hard via get_bytes;
+        # treat empty as missing — never instruct callers to wipe local.
+        return "missing"
     try:
         meta_obj = json.loads(meta_bytes.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError):
-        return False
+        return "error"
     if not isinstance(meta_obj, dict):
-        return False
+        return "error"
     if _meta_expired(meta_obj):
         discard_session_blobs(
             session_id, extension=str(meta_obj.get("extension") or extension or "") or None
         )
         logger.info("blob_hydrate_expired session_id_prefix=%s", session_id[:8])
-        return False
+        return "expired"
 
     directory.mkdir(parents=True, exist_ok=True)
     meta_path = directory / "meta.json"
@@ -253,7 +258,7 @@ def hydrate_session_dir(
             if data is not None:
                 dest.write_bytes(data)
     logger.info("blob_hydrate session_id_prefix=%s", session_id[:8])
-    return True
+    return "ok"
 
 
 def discard_session_blobs(session_id: str, *, extension: str | None = None) -> None:

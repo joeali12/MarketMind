@@ -308,11 +308,12 @@ def _ensure_local_session(session_id: str) -> None:
         if not session_blob.blob_enabled():
             return
         # force=True: overwrite stale /tmp copies after another isolate mutated.
-        ok = session_blob.hydrate_session_dir(
+        status = session_blob.hydrate_session_dir(
             session_id, _session_dir(session_id), force=True
         )
-        if not ok and _meta_path(session_id).exists():
-            # Blob said expired/missing — drop local too.
+        # Only TTL expiry may wipe local. missing/error/disabled keep /tmp —
+        # a failed blob GET must not destroy the only remaining upload copy.
+        if status == "expired" and _meta_path(session_id).exists():
             shutil.rmtree(_session_dir(session_id), ignore_errors=True)
     except Exception:  # noqa: BLE001
         logger.warning(

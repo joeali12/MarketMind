@@ -860,14 +860,20 @@ def _open_ended_analytics_turn(
             "raw_user_question_sent_externally": True,
         }
 
+    # Tool loop already tried Gemini with the user question when a key is set;
+    # do not compile again via LLM on the grounded fallback.
     grounded = gemini_tool_loop.grounded_tool_answer(
-        question=question, lang=lang, meta=meta
+        question=question, lang=lang, meta=meta, allow_llm=False
     )
     answer = grounded.get("answer") or (
         "I couldn’t complete AI assist; here are computed facts from your upload."
         if not ar
         else "المساعدة الذكية متاحتش؛ دي حقائق محسوبة من ملفك."
     )
+    sent_externally = loop.error_code not in {
+        "missing_key",
+        "sdk_missing",
+    } or bool(grounded.get("compiled_via_llm"))
     return {
         "answer_en": answer if not ar else answer,
         "answer_ar": answer if ar else answer,
@@ -893,6 +899,7 @@ def _open_ended_analytics_turn(
         "actions": (
             [{"type": "refresh_after_mutation"}] if grounded.get("mutated") else []
         ),
+        "raw_user_question_sent_externally": bool(sent_externally),
     }
 
 
