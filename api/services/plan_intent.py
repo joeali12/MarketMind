@@ -109,7 +109,6 @@ def soft_reshape_cue(question: str) -> bool:
         "row",
         "invoice",
         "timestamp",
-        "00:00",
         "00:00:00",
     )
     if any(v in q or v in q_low for v in verbs) and any(

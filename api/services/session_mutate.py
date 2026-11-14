@@ -435,20 +435,32 @@ def _run_step(
         if not col:
             raise SafeExprError("strip_time: no date column")
         out = df.copy()
-        # Persist YYYY-MM-DD strings so UI never re-shows midnight ``00:00:00``.
-        parsed = pd.to_datetime(out[col], errors="coerce", format="mixed")
-        date_only = parsed.dt.strftime("%Y-%m-%d")
-        unparsed = parsed.isna() & out[col].notna()
-        if unparsed.any():
-            stripped = (
-                out.loc[unparsed, col]
+        # Strip clock text only — do NOT re-parse with format="mixed" (would
+        # swap DMY ↔ MDY). Session-confirmed dayfirst lives in legacy strip_time.
+        date_fmt = str(step.get("date_format") or "").strip().lower()
+        if date_fmt in {"dayfirst", "monthfirst", "iso"}:
+            from api.services.data_transforms import _parse_datetimes
+
+            parsed = _parse_datetimes(out[col], date_fmt)
+            date_only = parsed.dt.strftime("%Y-%m-%d")
+            unparsed = parsed.isna() & out[col].notna()
+            if unparsed.any():
+                stripped = (
+                    out.loc[unparsed, col]
+                    .map(lambda v: "" if pd.isna(v) else str(v))
+                    .str.replace(r"\s*\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?", "", regex=True)
+                    .str.strip()
+                )
+                date_only = date_only.astype("string")
+                date_only.loc[unparsed] = stripped
+            out[col] = date_only.where(date_only.notna() & (date_only != ""), out[col])
+        else:
+            out[col] = (
+                out[col]
                 .map(lambda v: "" if pd.isna(v) else str(v))
-                .str.replace(r"\d{1,2}:\d{2}(:\d{2})?(\.\d+)?", "", regex=True)
+                .str.replace(r"\s*\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?", "", regex=True)
                 .str.strip()
             )
-            date_only = date_only.astype("string")
-            date_only.loc[unparsed] = stripped
-        out[col] = date_only.where(date_only.notna() & (date_only != ""), out[col])
         return out, f"strip_time on {col}"
 
     if op == "fillna":
@@ -577,7 +589,6 @@ _STRIP_TIME_PHRASES = (
     "بالساعات",
     "تاريخ فقط",
     "00:00:00",
-    "00:00",
     "strip time",
     "strip hours",
     "strip the time",
@@ -594,8 +605,15 @@ _STRIP_TIME_PHRASES = (
 )
 
 
+def _mentions_midnight_clock(q_low: str) -> bool:
+    """True only for literal midnight ``00:00:00`` — not ``10:00:00`` / ``00:00`` substrings."""
+    return "00:00:00" in q_low
+
+
 def _wants_strip_time(q: str, q_low: str) -> bool:
     if any(p in q or p in q_low for p in _STRIP_TIME_PHRASES):
+        return True
+    if _mentions_midnight_clock(q_low):
         return True
     # Loose EN: "strip/remove … time/hours" with words in between.
     if re.search(
@@ -626,17 +644,19 @@ def _strip_time_is_imperative(q: str, q_low: str) -> bool:
             "remove time",
             "remove hours",
             "remove the time",
-            "00:00:00",
-            "00:00",
         )
     ):
         return True
+    if _mentions_midnight_clock(q_low) and re.search(
+        r"(شيل|امسح|احذف|strip|remove)", q_low if "strip" in q_low or "remove" in q_low else q
+    ):
+        return True
     if re.search(
-        r"(?i)\b(strip|remove)\b.{0,24}\b(time|hours?|00:00)\b",
+        r"(?i)\b(strip|remove)\b.{0,24}\b(time|hours?)\b",
         q_low,
     ):
         return True
-    if re.search(r"(شيل|امسح).{0,24}(وقت|ساعة|الساعات|00:00)", q):
+    if re.search(r"(شيل|امسح).{0,24}(وقت|ساعة|الساعات)", q):
         return True
     return False
 
@@ -758,14 +778,12 @@ def compile_plan(
     # Match spoken AR/EN: «شيل الوقت بالساعات», «remove the time», «strip hours»…
     if _wants_strip_time(q, q_low) and (
         any(k in q or k in q_low for k in ("تاريخ", "date", "timestamp", "datetime", "عمود"))
-        or "00:00" in q_low
+        or _mentions_midnight_clock(q_low)
     ):
         return {
             "op": "strip_time",
             "column": col_named("InvoiceDate", "date", "تاريخ"),
-            "confirm_apply": wants_apply
-            or _strip_time_is_imperative(q, q_low)
-            or "00:00" in q_low,
+            "confirm_apply": wants_apply or _strip_time_is_imperative(q, q_low),
         }
 
     if (

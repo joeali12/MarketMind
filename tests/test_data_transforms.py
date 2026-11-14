@@ -247,6 +247,23 @@ def test_midnight_datetime_counts_as_time_to_strip():
     assert dx.format_date_only(s.iloc[0]) == "2025-03-13"
 
 
+def test_date_only_slash_dates_do_not_count_as_time():
+    import pandas as pd
+
+    from api.services import data_transforms as dx
+    from api.services import session_mutate as sm
+
+    s = pd.Series(["04/05/2024", "13/05/2024", "2024-05-04"])
+    has, count = dx._has_time_component(s)
+    assert has is False
+    assert count == 0
+    # ``10:00:00`` must not trigger midnight strip / auto-apply.
+    assert not sm._mentions_midnight_clock("why is 10:00:00 showing?")
+    assert sm._mentions_midnight_clock("شيل الـ 00:00:00 من التاريخ")
+    parsed = sm.compile_plan("what does 10:00:00 mean on the invoice?", columns=["InvoiceDate"])
+    assert parsed is None or parsed.get("op") != "strip_time"
+
+
 def test_strip_time_persists_date_only_strings_for_midnight(tmp_path, monkeypatch):
     import pandas as pd
 

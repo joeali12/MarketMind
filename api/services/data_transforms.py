@@ -138,7 +138,6 @@ def _datetime_candidates(df: pd.DataFrame, mapping: dict[str, str] | None) -> li
 
 
 _CLOCK_RE = re.compile(r"\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?")
-_PURE_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _value_str(value: object) -> str:
@@ -156,17 +155,12 @@ def _value_str(value: object) -> str:
 def _has_time_component(series: pd.Series) -> tuple[bool, int]:
     """Return (any_time_present, count_with_time).
 
-    Midnight ``00:00:00`` and string timestamps count as time-to-strip — the gaps
-    UI shows ``str(Timestamp)`` with that clock even when pandas ``astype(str)``
-    drops it.
+    Only clock substrings count (incl. midnight ``00:00:00`` via ``str(Timestamp)``).
+    Date-only values like ``04/05/2024`` or ``2024-05-04`` do not.
     """
     as_str = series.map(_value_str)
     clock = as_str.str.contains(_CLOCK_RE.pattern, regex=True, na=False)
-    # Datetime-like values that are not already pure YYYY-MM-DD strings.
-    parsed = pd.to_datetime(series, errors="coerce", format="mixed")
-    pure_date = as_str.str.match(_PURE_DATE_RE.pattern, na=False)
-    stripable = clock | (parsed.notna() & ~pure_date)
-    count = int(stripable.sum())
+    count = int(clock.sum())
     return count > 0, count
 
 
@@ -222,10 +216,22 @@ def preview_or_apply(
 
     mapping = dict(meta.column_mapping or {})
 
+    def _steps_with_date_format(raw_steps: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+        fmt = (getattr(meta, "date_format", None) or "").strip().lower()
+        out_steps: list[dict[str, Any]] = []
+        for step in raw_steps or []:
+            if not isinstance(step, dict):
+                continue
+            item = dict(step)
+            if item.get("op") == "strip_time" and fmt and not item.get("date_format"):
+                item["date_format"] = fmt
+            out_steps.append(item)
+        return out_steps
+
     if op == "plan":
         from api.services import session_mutate
 
-        steps = plan or []
+        steps = _steps_with_date_format(plan)
         result = session_mutate.execute_steps(
             df, steps, mapping=mapping, protected_drop=_PROTECTED_DROP
         )
@@ -293,7 +299,7 @@ def preview_or_apply(
             "threshold": result.get("threshold", threshold),
             "fill_value": fill_value,
             "rename_to": result.get("rename_to") or rename_to,
-            "plan": plan if op == "plan" else None,
+            "plan": (_steps_with_date_format(plan) if op == "plan" else None),
         }
         upload_store.save_meta(meta)
         # Drop heavy frame from preview response
@@ -305,7 +311,10 @@ def preview_or_apply(
         from api.services import session_mutate
 
         applied = session_mutate.execute_steps(
-            df, plan or [], mapping=mapping, protected_drop=_PROTECTED_DROP
+            df,
+            _steps_with_date_format(plan),
+            mapping=mapping,
+            protected_drop=_PROTECTED_DROP,
         )
     else:
         handler = {
