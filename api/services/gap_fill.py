@@ -23,6 +23,13 @@ import pandas as pd
 
 from marketmind.config import SOURCE_COLUMN_MAP
 
+
+def _serialize_invoice_date(value: object) -> str | None:
+    """Gaps UI dates are calendar-only — never show Timestamp midnight clocks."""
+    from api.services.data_transforms import format_date_only
+
+    return format_date_only(value)
+
 # Fields we may propose from file patterns (with explicit user approval).
 # Quantity is never median-invented — transaction qty stays owner-owned.
 SMART_FILLABLE = frozenset({"unit_price", "description"})
@@ -283,9 +290,7 @@ def suggest_for_parsed(parsed: pd.DataFrame, *, limit: int = 25) -> dict[str, An
                 if pd.isna(row.get("unit_price"))
                 else float(row.get("unit_price")),
                 "customer_id": _serialize_customer_id(row.get("customer_id")),
-                "invoice_date": None
-                if pd.isna(row.get("invoice_date"))
-                else str(row.get("invoice_date")),
+                "invoice_date": _serialize_invoice_date(row.get("invoice_date")),
                 "issues": issues,
                 "suggestions": suggestions,
             }

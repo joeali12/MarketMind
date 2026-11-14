@@ -435,11 +435,20 @@ def _run_step(
         if not col:
             raise SafeExprError("strip_time: no date column")
         out = df.copy()
-        out[col] = (
-            out[col]
-            .astype(str)
-            .str.replace(r"\s+\d{1,2}:\d{2}(:\d{2})?(\.\d+)?", "", regex=True)
-        )
+        # Persist YYYY-MM-DD strings so UI never re-shows midnight ``00:00:00``.
+        parsed = pd.to_datetime(out[col], errors="coerce", format="mixed")
+        date_only = parsed.dt.strftime("%Y-%m-%d")
+        unparsed = parsed.isna() & out[col].notna()
+        if unparsed.any():
+            stripped = (
+                out.loc[unparsed, col]
+                .map(lambda v: "" if pd.isna(v) else str(v))
+                .str.replace(r"\d{1,2}:\d{2}(:\d{2})?(\.\d+)?", "", regex=True)
+                .str.strip()
+            )
+            date_only = date_only.astype("string")
+            date_only.loc[unparsed] = stripped
+        out[col] = date_only.where(date_only.notna() & (date_only != ""), out[col])
         return out, f"strip_time on {col}"
 
     if op == "fillna":
@@ -567,6 +576,8 @@ _STRIP_TIME_PHRASES = (
     "الوقت بالساعات",
     "بالساعات",
     "تاريخ فقط",
+    "00:00:00",
+    "00:00",
     "strip time",
     "strip hours",
     "strip the time",
@@ -615,15 +626,17 @@ def _strip_time_is_imperative(q: str, q_low: str) -> bool:
             "remove time",
             "remove hours",
             "remove the time",
+            "00:00:00",
+            "00:00",
         )
     ):
         return True
     if re.search(
-        r"(?i)\b(strip|remove)\b.{0,24}\b(time|hours?)\b",
+        r"(?i)\b(strip|remove)\b.{0,24}\b(time|hours?|00:00)\b",
         q_low,
     ):
         return True
-    if re.search(r"(شيل|امسح).{0,20}(وقت|ساعة|الساعات)", q):
+    if re.search(r"(شيل|امسح).{0,24}(وقت|ساعة|الساعات|00:00)", q):
         return True
     return False
 
@@ -743,13 +756,16 @@ def compile_plan(
 
     # Meta-aware legacy ops (date_format, blank-invoice pooling rules, …)
     # Match spoken AR/EN: «شيل الوقت بالساعات», «remove the time», «strip hours»…
-    if _wants_strip_time(q, q_low) and any(
-        k in q or k in q_low for k in ("تاريخ", "date", "timestamp", "datetime", "عمود")
+    if _wants_strip_time(q, q_low) and (
+        any(k in q or k in q_low for k in ("تاريخ", "date", "timestamp", "datetime", "عمود"))
+        or "00:00" in q_low
     ):
         return {
             "op": "strip_time",
             "column": col_named("InvoiceDate", "date", "تاريخ"),
-            "confirm_apply": wants_apply or _strip_time_is_imperative(q, q_low),
+            "confirm_apply": wants_apply
+            or _strip_time_is_imperative(q, q_low)
+            or "00:00" in q_low,
         }
 
     if (

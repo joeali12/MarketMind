@@ -226,7 +226,65 @@ def test_soft_reshape_cue_covers_user_screenshot_phrasing():
 
     assert plan_intent.soft_reshape_cue("شيل الوقت بالساعات في التاريخ")
     assert plan_intent.soft_reshape_cue("remove the time from dates")
+    assert plan_intent.soft_reshape_cue("شيل الـ 00:00:00 من التاريخ")
     assert not plan_intent.soft_reshape_cue("قارن مبيعات الشهر ده باللي قبله")
+
+
+def test_midnight_datetime_counts_as_time_to_strip():
+    """UI shows str(Timestamp)='… 00:00:00'; never claim date-only / leave clocks."""
+    import pandas as pd
+
+    from api.services import data_transforms as dx
+
+    s = pd.to_datetime(pd.Series(["2025-03-13 00:00:00", "2025-04-06 00:00:00"]))
+    has, count = dx._has_time_component(s)
+    assert has is True
+    assert count == 2
+    assert dx.format_date_only(s.iloc[0]) == "2025-03-13"
+
+
+def test_strip_time_persists_date_only_strings_for_midnight(tmp_path, monkeypatch):
+    import pandas as pd
+
+    from api.services import data_transforms as dx
+    from api.services import upload_store
+
+    monkeypatch.setenv("MARKETMIND_USE_TMP_UPLOADS", "1")
+    monkeypatch.setattr(upload_store, "UPLOAD_TMP_ROOT", tmp_path)
+
+    raw = (
+        "Invoice,StockCode,Description,Quantity,InvoiceDate,Price,Customer ID,Country\n"
+        "1,A,Tea,1,2025-03-13 00:00:00,10,C1,EG\n"
+        "2,B,Coffee,2,2025-04-06 00:00:00,20,C2,EG\n"
+    ).encode()
+    meta = upload_store.create_session("midnight.csv", raw)
+    meta.date_format = "iso"
+    meta.date_format_confirmed = True
+    meta.column_mapping = {
+        "invoice": "Invoice",
+        "stock_code": "StockCode",
+        "description": "Description",
+        "quantity": "Quantity",
+        "invoice_date": "InvoiceDate",
+        "unit_price": "Price",
+        "customer_id": "Customer ID",
+        "country": "Country",
+    }
+    upload_store.save_meta(meta)
+
+    result = dx.preview_or_apply(meta, op="strip_time", confirm_apply=True)
+    assert result.get("ok") is True, result
+    assert result.get("error_code") != "no_time_component"
+
+    path = upload_store.upload_path(meta.session_id)
+    df = pd.read_csv(path)
+    vals = df["InvoiceDate"].astype(str).tolist()
+    assert vals == ["2025-03-13", "2025-04-06"]
+    assert all(":" not in v for v in vals)
+    # Must not claim “already date-only” for midnight datetime columns.
+    preview = dx.preview_or_apply(meta, op="strip_time", confirm_apply=False)
+    # After strip, pure YYYY-MM-DD strings → truly date-only.
+    assert preview.get("error_code") == "no_time_component"
 
 
 def test_parse_intent_ignores_weak_and_picks_threshold_near_comparison():

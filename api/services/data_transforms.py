@@ -137,23 +137,55 @@ def _datetime_candidates(df: pd.DataFrame, mapping: dict[str, str] | None) -> li
     return cols
 
 
+_CLOCK_RE = re.compile(r"\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?")
+_PURE_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _value_str(value: object) -> str:
+    """Human string form — keeps Timestamp midnight as ``… 00:00:00`` (unlike astype)."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(value)
+
+
 def _has_time_component(series: pd.Series) -> tuple[bool, int]:
-    """Return (any_time_present, count_with_time)."""
+    """Return (any_time_present, count_with_time).
+
+    Midnight ``00:00:00`` and string timestamps count as time-to-strip — the gaps
+    UI shows ``str(Timestamp)`` with that clock even when pandas ``astype(str)``
+    drops it.
+    """
+    as_str = series.map(_value_str)
+    clock = as_str.str.contains(_CLOCK_RE.pattern, regex=True, na=False)
+    # Datetime-like values that are not already pure YYYY-MM-DD strings.
     parsed = pd.to_datetime(series, errors="coerce", format="mixed")
-    valid = parsed.dropna()
-    if valid.empty:
-        # string clock patterns
-        as_str = series.astype(str)
-        hit = as_str.str.contains(r"\d{1,2}:\d{2}", regex=True, na=False)
-        return bool(hit.any()), int(hit.sum())
-    with_time = (valid.dt.hour != 0) | (valid.dt.minute != 0) | (valid.dt.second != 0)
-    # also count string times even when midnight
-    as_str = series.astype(str)
-    clock = as_str.str.contains(r"\d{1,2}:\d{2}", regex=True, na=False)
-    count = int(with_time.sum()) + int((clock & parsed.isna()).sum())
-    # If strings contain clock, count those too even when time is 00:00
-    count = max(count, int(clock.sum()))
+    pure_date = as_str.str.match(_PURE_DATE_RE.pattern, na=False)
+    stripable = clock | (parsed.notna() & ~pure_date)
+    count = int(stripable.sum())
     return count > 0, count
+
+
+def format_date_only(value: object) -> str | None:
+    """Serialize a date/datetime for UI as YYYY-MM-DD (never ``… 00:00:00``)."""
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        return None
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.notna(parsed):
+        return pd.Timestamp(parsed).strftime("%Y-%m-%d")
+    text = _value_str(value).strip()
+    if not text or text.lower() in {"nat", "none", "nan"}:
+        return None
+    return _CLOCK_RE.sub("", text).strip() or text
 
 
 def preview_or_apply(
@@ -356,7 +388,9 @@ def _op_strip_time(
             has, count = _has_time_component(df[c])
             if has and count >= best_count:
                 best, best_count = c, count
-        target = best
+        # Prefer a timed column; otherwise keep the mapped/date candidate so we
+        # can say “already date-only” instead of “no datetime column”.
+        target = best or (candidates[0] if candidates else None)
     if not target or target not in df.columns:
         return {
             "ok": False,
@@ -367,36 +401,41 @@ def _op_strip_time(
 
     has, count = _has_time_component(df[target])
     if not has:
+        # Never claim “no time” when any cell string still shows a clock (incl. 00:00:00).
+        sample = ", ".join(
+            _value_str(v) for v in df[target].dropna().head(3).tolist()
+        ) or "(empty)"
         return {
             "ok": False,
             "error_code": "no_time_component",
-            "message_en": f"Column {target!r} already looks date-only.",
-            "message_ar": f"العمود {target} أصلاً تاريخ من غير وقت.",
+            "message_en": (
+                f"Column {target!r} already looks date-only "
+                f"(no HH:MM / 00:00:00 in values; e.g. {sample})."
+            ),
+            "message_ar": (
+                f"العمود {target} باين تاريخ بس من غير ساعة "
+                f"(مفيش HH:MM أو 00:00:00 في القيم؛ مثال: {sample})."
+            ),
             "column": target,
         }
 
     out = df.copy()
-    date_fmt = getattr(meta, "date_format", None)
-    parsed = _parse_datetimes(out[target], date_fmt)
-    # Confirmed format → ISO date. Unconfirmed → strip clock text only (preserve day/month order).
-    if (date_fmt or "").strip().lower() in {"dayfirst", "monthfirst", "iso"}:
-        date_only = parsed.dt.strftime("%Y-%m-%d")
-        unparsed = parsed.isna() & out[target].notna()
-        if unparsed.any():
-            stripped = (
-                out.loc[unparsed, target]
-                .astype(str)
-                .str.replace(r"\s+\d{1,2}:\d{2}(:\d{2})?(\.\d+)?", "", regex=True)
-            )
-            date_only = date_only.astype("string")
-            date_only.loc[unparsed] = stripped
-        out[target] = date_only.where(date_only.notna(), out[target])
-    else:
-        out[target] = (
-            out[target]
-            .astype(str)
-            .str.replace(r"\s+\d{1,2}:\d{2}(:\d{2})?(\.\d+)?", "", regex=True)
+    parsed = _parse_datetimes(out[target], getattr(meta, "date_format", None))
+    # Always persist calendar date strings — never leave Timestamp midnight
+    # (UI would show ``2025-03-13 00:00:00`` again).
+    date_only = parsed.dt.strftime("%Y-%m-%d")
+    unparsed = parsed.isna() & out[target].notna()
+    if unparsed.any():
+        stripped = (
+            out.loc[unparsed, target]
+            .map(_value_str)
+            .str.replace(_CLOCK_RE.pattern, "", regex=True)
+            .str.strip()
         )
+        date_only = date_only.astype("string")
+        date_only.loc[unparsed] = stripped
+    # Keep original only when both parse and strip failed.
+    out[target] = date_only.where(date_only.notna() & (date_only != ""), out[target])
 
     preview = {
         "ok": True,
