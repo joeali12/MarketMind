@@ -69,11 +69,19 @@ Synthetic fixtures test **behavior only** — not model quality.
 
 The Cloud app reads committed artifacts and the small derived parquet files in `docs/deployment.md`. It does not need `data/raw/online_retail_II.xlsx`. Record a URL in this README only after that URL loads and the six pages are checked.
 
-## Screenshot
+## Screenshots (current product UI)
 
-![MarketMind home (local Next.js demo)](docs/screenshots/home.png)
+Local **Next.js + FastAPI** product (not the academic Streamlit multipage shell). Captured 2026-11-14 from `http://127.0.0.1:3001`.
 
-_Local product UI. Upload journey shots: `docs/screenshots/e2e/`._
+**Upload (entry / home redirects here)**
+
+![MarketMind upload — current product](docs/screenshots/home.png)
+
+**Store overview (demo UK sample)**
+
+![MarketMind store overview — current product](docs/screenshots/overview.png)
+
+Also: `docs/screenshots/upload.png` (same upload surface), `docs/screenshots/products.png`, and browser journey shots under `docs/screenshots/e2e/`.
 
 ## Data source
 

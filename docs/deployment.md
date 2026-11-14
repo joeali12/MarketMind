@@ -1,6 +1,6 @@
 # Streamlit Community Cloud
 
-**Status:** Public deploy of this Streamlit app was approved on 2026-11-11 (D1/D8). **No public URL exists yet.** Do not claim the app is live until a `*.streamlit.app` URL opens and its pages are checked.
+**Status:** Public deploy of this Streamlit app was approved on 2026-11-11 (D1/D8). **No public `*.streamlit.app` URL exists yet** — Community Cloud still needs an interactive login at https://share.streamlit.io (no API token on this machine). Do not claim the app is live until that URL opens and its pages are checked.
 
 **This PDF app is Streamlit only.** Entrypoint: `app.py` at the repository root. The Next.js/FastAPI UI is not the Cloud app.
 

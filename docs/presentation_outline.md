@@ -14,4 +14,4 @@ Numbers from `artifacts/model_metadata.json` / reports (verified). Live URL: pen
 10. **App** — Streamlit demo: validation, segments, customer lookup, provisional heuristics. URL pending.
 11. **Limitations / next** — Historical data; high zero-target rate; eligible positive spend (not net revenue); provisional heuristic actions only; public deploy not approved.
 
-Screenshot: `docs/screenshots/home.png` (local). GIF optional later.
+Screenshot: `docs/screenshots/home.png` (current Next product upload UI). GIF optional later.
