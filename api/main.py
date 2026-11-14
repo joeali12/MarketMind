@@ -58,9 +58,11 @@ async def _lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="MarketMind API", version="0.1.0", lifespan=_lifespan)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+def _cors_origins() -> list[str]:
+    """Local defaults plus comma-separated ALLOWED_ORIGINS (Vercel / custom domains)."""
+    import os
+
+    base = [
         "http://127.0.0.1:3000",
         "http://localhost:3000",
         "http://127.0.0.1:3001",
@@ -73,7 +75,22 @@ app.add_middleware(
         "http://localhost:8503",
         "http://127.0.0.1:8000",
         "http://localhost:8000",
-    ],
+    ]
+    extra = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+    # Dedupe, preserve order
+    seen: set[str] = set()
+    out: list[str] = []
+    for o in base + extra:
+        if o not in seen:
+            seen.add(o)
+            out.append(o)
+    return out
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins(),
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

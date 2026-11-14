@@ -7,6 +7,7 @@ import { SourceBadge } from "@/components/SourceSelector";
 import { BarSeriesChart } from "@/components/charts/BarSeriesChart";
 import { useLang } from "@/context/LangContext";
 import { useDataSource } from "@/context/DataSourceContext";
+import { isUploadSessionGoneError } from "@/lib/dataSource";
 
 type Prod = {
   stock_code: string;
@@ -22,7 +23,7 @@ type Cat = { category: string | null; spend: number; quantity: number; orders: n
 
 export default function ProductsPage() {
   const { t, lang } = useLang();
-  const { ready, mode, sessionId, currencyCode } = useDataSource();
+  const { ready, mode, sessionId, currencyCode, clearUpload } = useDataSource();
   const [products, setProducts] = useState<Prod[]>([]);
   const [trend, setTrend] = useState<Trend[]>([]);
   const [categories, setCategories] = useState<Cat[]>([]);
@@ -61,7 +62,10 @@ export default function ProductsPage() {
           );
         } catch (e) {
           if (cancelled) return;
-          // Keep upload mode visible — never silently show demo badge/data.
+          if (isUploadSessionGoneError(e)) {
+            clearUpload();
+            return;
+          }
           setSource("upload");
           setProducts([]);
           setTrend([]);
@@ -90,7 +94,7 @@ export default function ProductsPage() {
     return () => {
       cancelled = true;
     };
-  }, [lang, ready, mode, sessionId]);
+  }, [lang, ready, mode, sessionId, clearUpload]);
 
   return (
     <main className="main">

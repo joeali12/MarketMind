@@ -67,3 +67,15 @@ export function clearPersistedSource(): void {
   window.sessionStorage.removeItem(UPLOAD_SESSION_KEY);
   window.sessionStorage.removeItem("mm_upload_session");
 }
+
+
+/** True when the API no longer has this browser's upload session (common on serverless /tmp). */
+export function isUploadSessionGoneError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  const lower = msg.toLowerCase();
+  return (
+    lower.includes("upload session not found") ||
+    lower.includes("session not found or expired") ||
+    lower.includes("not found or expired")
+  );
+}

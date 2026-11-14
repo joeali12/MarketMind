@@ -1,0 +1,17 @@
+# Product API — https://dashboard.render.com → New → Blueprint
+# Pair with Vercel project rooted at web/ (MARKETMIND_API_URL = this service URL).
+services:
+  - type: web
+    name: marketmind-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile.api
+    dockerContext: .
+    healthCheckPath: /api/meta
+    envVars:
+      - key: PYTHONPATH
+        value: /app/src:/app
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false

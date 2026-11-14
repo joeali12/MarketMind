@@ -1,3 +1,15 @@
+# Deployment
+
+## Product (Next.js + FastAPI) — primary public UI
+
+- **Web:** https://marketmind-web-ochre.vercel.app/
+- **API:** https://marketmind-api-phi.vercel.app/
+- Source: `web/` + `api/` · see `docs/product_deploy.md`
+
+Streamlit below is the **academic PDF** app only.
+
+---
+
 # Streamlit Community Cloud
 
 **Status:** Public deploy of this Streamlit app was approved on 2026-11-11 (D1/D8). **No public `*.streamlit.app` URL exists yet** — Community Cloud still needs an interactive login at https://share.streamlit.io (no API token on this machine). Do not claim the app is live until that URL opens and its pages are checked.

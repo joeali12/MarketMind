@@ -7,11 +7,12 @@ import { DemoBadge } from "@/components/DemoBadge";
 import { SourceBadge } from "@/components/SourceSelector";
 import { useLang } from "@/context/LangContext";
 import { useDataSource } from "@/context/DataSourceContext";
+import { isUploadSessionGoneError } from "@/lib/dataSource";
 
 function ProfileInner() {
   const { t, lang } = useLang();
   const sp = useSearchParams();
-  const { ready, mode, sessionId, currencyCode } = useDataSource();
+  const { ready, mode, sessionId, currencyCode, clearUpload } = useDataSource();
   const [ids, setIds] = useState<{ customer_id: number }[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
@@ -38,8 +39,14 @@ function ProfileInner() {
           : list[0]?.customer_id;
       if (initial) setSelected(initial);
       else setSelected(null);
-    }).catch((e) => setError(String(e.message || e)));
-  }, [ready, sp, mode, sessionId]);
+    }).catch((e) => {
+      if (mode === "upload" && isUploadSessionGoneError(e)) {
+        clearUpload();
+        return;
+      }
+      setError(String(e.message || e));
+    });
+  }, [ready, sp, mode, sessionId, clearUpload]);
 
   useEffect(() => {
     if (!ready || !selected) {
@@ -51,10 +58,14 @@ function ProfileInner() {
         ? api.uploadCustomer(sessionId, selected)
         : api.customer(selected);
     load.then(setProfile).catch((e) => {
+      if (mode === "upload" && isUploadSessionGoneError(e)) {
+        clearUpload();
+        return;
+      }
       setProfile(null);
       setError(String(e.message || e));
     });
-  }, [ready, selected, mode, sessionId]);
+  }, [ready, selected, mode, sessionId, clearUpload]);
 
   const customer = (profile?.customer || {}) as Record<string, unknown>;
   const estimate = (profile?.estimate || {}) as Record<string, unknown>;

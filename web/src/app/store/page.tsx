@@ -9,12 +9,13 @@ import { BarSeriesChart } from "@/components/charts/BarSeriesChart";
 import { PageSkeleton } from "@/components/PageSkeleton";
 import { useLang } from "@/context/LangContext";
 import { useDataSource } from "@/context/DataSourceContext";
+import { isUploadSessionGoneError } from "@/lib/dataSource";
 
 type TrendRange = "3m" | "6m" | "12m" | "all";
 
 export default function StorePage() {
   const { t, lang } = useLang();
-  const { mode, sessionId, currencyCode, ready } = useDataSource();
+  const { mode, sessionId, currencyCode, ready, clearUpload } = useDataSource();
   const [data, setData] = useState<Record<string, unknown> | null>(null);
   const [products, setProducts] = useState<Record<string, unknown> | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -42,18 +43,28 @@ export default function StorePage() {
         setLoading(false);
       })
       .catch((e) => {
-        if (!cancelled) setErr(String(e.message || e));
-        if (!cancelled) setLoading(false);
+        if (cancelled) return;
+        if (isUpload && isUploadSessionGoneError(e)) {
+          // Stale sessionStorage after serverless /tmp expiry — fall back to demo.
+          clearUpload();
+          return;
+        }
+        setErr(String(e.message || e));
+        setLoading(false);
       });
     loadProducts
       .then((prod) => {
         if (!cancelled) setProducts(prod);
       })
-      .catch(() => undefined);
+      .catch((e) => {
+        if (!cancelled && isUpload && isUploadSessionGoneError(e)) {
+          clearUpload();
+        }
+      });
     return () => {
       cancelled = true;
     };
-  }, [mode, sessionId, ready]);
+  }, [mode, sessionId, ready, clearUpload]);
 
   const metrics = (data?.metrics || {}) as Record<
     string,

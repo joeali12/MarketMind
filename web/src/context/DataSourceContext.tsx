@@ -11,6 +11,7 @@ import {
 } from "react";
 import {
   clearPersistedSource,
+  isUploadSessionGoneError,
   readPersistedSource,
   writePersistedSource,
   type DataSourceMode,
@@ -35,13 +36,47 @@ type Ctx = {
 
 const DataSourceContext = createContext<Ctx | null>(null);
 
+async function sessionStillAlive(sessionId: string): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `/api/upload/${encodeURIComponent(sessionId)}/overview`,
+      { cache: "no-store" }
+    );
+    if (res.ok) return true;
+    if (res.status === 404) return false;
+    // Other errors: treat as gone so dashboard can show demo rather than hang
+    const text = await res.text();
+    return !isUploadSessionGoneError(text);
+  } catch (e) {
+    return !isUploadSessionGoneError(e);
+  }
+}
+
 export function DataSourceProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<PersistedSource>({ mode: "demo" });
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    setState(readPersistedSource());
-    setReady(true);
+    let cancelled = false;
+    (async () => {
+      const persisted = readPersistedSource();
+      if (persisted.mode === "upload" && persisted.sessionId) {
+        const alive = await sessionStillAlive(persisted.sessionId);
+        if (cancelled) return;
+        if (!alive) {
+          clearPersistedSource();
+          setState({ mode: "demo" });
+          setReady(true);
+          return;
+        }
+      }
+      if (cancelled) return;
+      setState(persisted);
+      setReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const setDemo = useCallback(() => {
