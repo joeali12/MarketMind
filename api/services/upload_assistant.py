@@ -578,6 +578,82 @@ def _analytics_only_grounded(
     }
 
 
+def _is_session_transform_turn(question: str, meta: UploadSessionMeta | None) -> bool:
+    if meta is None:
+        return False
+    from api.services import data_transforms as _dx
+
+    return bool(
+        _dx.parse_transform_intent(
+            question, pending=getattr(meta, "pending_transform", None)
+        )
+    )
+
+
+def _transform_turn_result(
+    *,
+    question: str,
+    lang: str,
+    meta: UploadSessionMeta | None,
+    history: list[dict[str, str]] | None,
+    profile: dict[str, Any],
+    analytics: dict[str, Any] | None,
+    status: dict[str, Any],
+    citations: list[dict[str, Any]],
+    ar: bool,
+) -> dict[str, Any]:
+    """Run a session transform via the open-ended path and return a full answer payload."""
+    open_result = _open_ended_analytics_turn(
+        question=question,
+        lang=lang,
+        meta=meta,
+        history=history,
+        profile=profile,
+        analytics=analytics,
+    )
+    answer_en = open_result["answer_en"]
+    answer_ar = open_result["answer_ar"]
+    citations = list(citations) + list(open_result.get("citations") or [])
+    result = {
+        "mode": open_result.get("mode", "grounded_facts"),
+        "adapter_invoked": bool(open_result.get("adapter_invoked")),
+        "provider_label_en": open_result.get("provider_label_en") or status["label_en"],
+        "provider_label_ar": open_result.get("provider_label_ar") or status["label_ar"],
+        "question": question,
+        "answer_en": answer_en,
+        "answer_ar": answer_ar,
+        "answer": answer_ar if ar else answer_en,
+        "citations": citations,
+        "actions": open_result.get("actions") or [],
+        "quick_replies": list(open_result.get("quick_replies") or []),
+        "unsupported": False,
+        "gemini_safe_intent": open_result.get("gemini_safe_intent"),
+        "tools_called": open_result.get("tools_called") or [],
+        "data_mutated": bool(open_result.get("data_mutated")),
+        "session_id": profile.get("session_id") or (meta.session_id if meta else None),
+        "demo": False,
+        "raw_rows_sent_externally": False,
+        "raw_user_question_sent_externally": False,
+        "fallback_used": bool(open_result.get("fallback_used")),
+        "privacy_disclosure_en": (
+            "When AI assist is on, your question may be sent to Google’s Gemini API "
+            "with server-computed aggregates only — never raw transaction rows or personal IDs."
+        ),
+        "privacy_disclosure_ar": (
+            "لما المساعدة الذكية تكون شغالة، سؤالك ممكن يتبعت لـ Gemini من Google "
+            "مع مجاميع محسوبة من السيرفر فقط — من غير صفوف خام أو أرقام شخصية."
+        ),
+    }
+    if open_result.get("fallback_reason_en"):
+        result["fallback_reason_en"] = open_result["fallback_reason_en"]
+        result["fallback_reason_ar"] = open_result.get("fallback_reason_ar")
+    if open_result.get("fallback_code"):
+        result["fallback_code"] = open_result["fallback_code"]
+    if open_result.get("gemini_skip_reason"):
+        result["gemini_skip_reason"] = open_result["gemini_skip_reason"]
+    return result
+
+
 def _open_ended_analytics_turn(
     *,
     question: str,
@@ -939,6 +1015,20 @@ def answer(
             "لسه مش هخترعلك رقم زبون أو تاريخ."
         )
         quick = ["show cleaning" if not ar else "ورّيني التنظيف"]
+
+    # --- Session transforms (before cleaning «apply» / «طبّق») ---
+    elif _is_session_transform_turn(q, meta):
+        return _transform_turn_result(
+            question=q,
+            lang=lang,
+            meta=meta,
+            history=history,
+            profile=profile,
+            analytics=analytics,
+            status=status,
+            citations=citations,
+            ar=ar,
+        )
 
     # --- Show / walk cleaning ---
     elif re.search(

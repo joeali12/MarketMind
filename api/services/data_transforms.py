@@ -27,19 +27,31 @@ ALLOWED_OPS = frozenset(
     }
 )
 
-# Columns that must not be dropped via assistant (core identity / money keys when present)
+# Normalized keys (spaces/underscores stripped) that must not be dropped.
 _PROTECTED_DROP = frozenset(
     {
         "invoice",
         "invoiceno",
-        "customer id",
+        "invoicenumber",
+        "orderno",
+        "orderid",
         "customerid",
+        "customer",
+        "clientid",
         "price",
-        "unit price",
+        "unitprice",
         "quantity",
         "qty",
+        "linetotal",
+        "lineamount",
+        "invoicedate",
+        "date",
     }
 )
+
+
+def _protect_key(name: object) -> str:
+    return re.sub(r"[\s_]+", "", _norm_col(name))
 
 
 def transform_backup_path(path: Path) -> Path:
@@ -75,6 +87,26 @@ def _write_source(meta: UploadSessionMeta, df: pd.DataFrame) -> None:
 
 def _norm_col(name: object) -> str:
     return re.sub(r"\s+", " ", str(name or "").strip().lower())
+
+
+def _parse_datetimes(series: pd.Series, date_format: str | None) -> pd.Series:
+    """Parse with the session-confirmed date order; never guess DMY vs MDY."""
+    fmt = (date_format or "").strip().lower()
+    if fmt == "dayfirst":
+        return pd.to_datetime(series, errors="coerce", format="mixed", dayfirst=True)
+    if fmt == "monthfirst":
+        return pd.to_datetime(series, errors="coerce", format="mixed", dayfirst=False)
+    if fmt == "iso":
+        parsed = pd.to_datetime(series, errors="coerce", format="ISO8601")
+        still = parsed.isna() & series.notna()
+        if still.any():
+            parsed = parsed.copy()
+            parsed.loc[still] = pd.to_datetime(
+                series[still], errors="coerce", format="%Y-%m-%d", exact=False
+            )
+        return parsed
+    # Unconfirmed: do not reinterpret slash dates — only parse unambiguous ISO-like values.
+    return pd.to_datetime(series, errors="coerce", format="ISO8601")
 
 
 def _resolve_column(df: pd.DataFrame, requested: str | None) -> str | None:
@@ -189,16 +221,16 @@ def preview_or_apply(
             (result.get("preview_ar") or "المعاينة جاهزة.")
             + " رد بـ «طبّق» عشان يتكتب على ملف الجلسة."
         )
-        # Stash args so a bare «طبّق» can finish the job.
+        # Stash resolved args so a bare «طبّق» can finish the job.
         from api.services import upload_store
 
         meta.pending_transform = {
             "op": op,
-            "column": column,
-            "new_column": new_column,
-            "threshold": threshold,
+            "column": result.get("column") or column,
+            "new_column": result.get("new_column") or new_column,
+            "threshold": result.get("threshold", threshold),
             "fill_value": fill_value,
-            "rename_to": rename_to,
+            "rename_to": result.get("rename_to") or rename_to,
         }
         upload_store.save_meta(meta)
         return result
@@ -278,21 +310,27 @@ def _op_strip_time(
         }
 
     out = df.copy()
-    parsed = pd.to_datetime(out[target], errors="coerce", format="mixed")
-    # Prefer ISO date string for session stability
-    date_only = parsed.dt.strftime("%Y-%m-%d")
-    # Keep original string for unparseable cells
-    unparsed = parsed.isna() & out[target].notna()
-    if unparsed.any():
-        # strip clock from strings like "15/01/2023 14:30"
-        stripped = (
-            out.loc[unparsed, target]
+    date_fmt = getattr(meta, "date_format", None)
+    parsed = _parse_datetimes(out[target], date_fmt)
+    # Confirmed format → ISO date. Unconfirmed → strip clock text only (preserve day/month order).
+    if (date_fmt or "").strip().lower() in {"dayfirst", "monthfirst", "iso"}:
+        date_only = parsed.dt.strftime("%Y-%m-%d")
+        unparsed = parsed.isna() & out[target].notna()
+        if unparsed.any():
+            stripped = (
+                out.loc[unparsed, target]
+                .astype(str)
+                .str.replace(r"\s+\d{1,2}:\d{2}(:\d{2})?(\.\d+)?", "", regex=True)
+            )
+            date_only = date_only.astype("string")
+            date_only.loc[unparsed] = stripped
+        out[target] = date_only.where(date_only.notna(), out[target])
+    else:
+        out[target] = (
+            out[target]
             .astype(str)
             .str.replace(r"\s+\d{1,2}:\d{2}(:\d{2})?(\.\d+)?", "", regex=True)
         )
-        date_only = date_only.astype("string")
-        date_only.loc[unparsed] = stripped
-    out[target] = date_only.where(date_only.notna(), out[target])
 
     preview = {
         "ok": True,
@@ -322,21 +360,13 @@ def _op_strip_time(
     return preview
 
 
-def _money_series(df: pd.DataFrame, mapping: dict[str, str]) -> pd.Series | None:
-    """Per-row monetary amount from mapping (line_amount or qty×price)."""
-    if mapping.get("line_amount") and mapping["line_amount"] in df.columns:
-        return pd.to_numeric(df[mapping["line_amount"]], errors="coerce")
+def _qty_price_series(df: pd.DataFrame, mapping: dict[str, str]) -> pd.Series | None:
     qty_c = mapping.get("quantity")
     price_c = mapping.get("unit_price")
     if qty_c and price_c and qty_c in df.columns and price_c in df.columns:
         return pd.to_numeric(df[qty_c], errors="coerce") * pd.to_numeric(
             df[price_c], errors="coerce"
         )
-    # Heuristic fallbacks
-    for c in df.columns:
-        n = _norm_col(c)
-        if n in {"linetotal", "line total", "line_amount", "amount", "revenue"}:
-            return pd.to_numeric(df[c], errors="coerce")
     qty = price = None
     for c in df.columns:
         n = _norm_col(c)
@@ -351,16 +381,52 @@ def _money_series(df: pd.DataFrame, mapping: dict[str, str]) -> pd.Series | None
     return None
 
 
+def _money_series(df: pd.DataFrame, mapping: dict[str, str]) -> pd.Series | None:
+    """Per-row monetary amount: line_amount with qty×price fill for blanks."""
+    qty_price = _qty_price_series(df, mapping)
+    line = None
+    if mapping.get("line_amount") and mapping["line_amount"] in df.columns:
+        line = pd.to_numeric(df[mapping["line_amount"]], errors="coerce")
+    else:
+        for c in df.columns:
+            n = _norm_col(c)
+            if n in {"linetotal", "line total", "line_amount", "amount", "revenue"}:
+                line = pd.to_numeric(df[c], errors="coerce")
+                break
+    if line is not None and qty_price is not None:
+        return line.fillna(qty_price)
+    if line is not None:
+        return line
+    return qty_price
+
+
 def _invoice_series(df: pd.DataFrame, mapping: dict[str, str]) -> pd.Series | None:
+    """Return invoice IDs as strings with blanks as <NA> (never group blanks together)."""
+    raw = None
     if mapping.get("invoice") and mapping["invoice"] in df.columns:
-        return df[mapping["invoice"]].astype(str)
-    for c in df.columns:
-        n = _norm_col(c)
-        if n in {"invoice", "invoiceno", "invoice no", "invoice number", "order id", "order_id"}:
-            return df[c].astype(str)
-        if "فاتور" in n:
-            return df[c].astype(str)
-    return None
+        raw = df[mapping["invoice"]]
+    else:
+        for c in df.columns:
+            n = _norm_col(c)
+            if n in {
+                "invoice",
+                "invoiceno",
+                "invoice no",
+                "invoice number",
+                "order id",
+                "order_id",
+            } or "فاتور" in n:
+                raw = df[c]
+                break
+    if raw is None:
+        return None
+    as_str = raw.astype("string").str.strip()
+    blank = (
+        as_str.isna()
+        | (as_str == "")
+        | as_str.str.lower().isin(["nan", "none", "<na>"])
+    )
+    return as_str.where(~blank, pd.NA)
 
 
 def _op_add_invoice_flag(
@@ -392,12 +458,18 @@ def _op_add_invoice_flag(
             "message_ar": "اربط الكمية وسعر الوحدة أو إجمالي السطر قبل إضافة علم قيمة الفاتورة.",
         }
     if inv is None:
-        # Fall back to per-row amount (not invoice aggregate)
         flags = money > thr
         mode = "row"
     else:
-        totals = money.groupby(inv).transform("sum")
-        flags = totals > thr
+        flags = pd.Series(False, index=df.index)
+        valid = inv.notna()
+        if valid.any():
+            totals = money[valid].groupby(inv[valid]).transform("sum")
+            flags.loc[valid] = (totals > thr).to_numpy()
+        # Blank invoice IDs: evaluate the row amount alone (do not pool blanks).
+        blank = ~valid
+        if blank.any():
+            flags.loc[blank] = (money[blank] > thr).fillna(False).to_numpy()
         mode = "invoice"
 
     true_n = int(flags.fillna(False).sum())
@@ -440,10 +512,15 @@ def _op_add_invoice_flag(
     return preview
 
 
+def _mapped_source_names(mapping: dict[str, str] | None) -> set[str]:
+    return {str(v) for v in (mapping or {}).values() if v}
+
+
 def _op_drop_column(
     df: pd.DataFrame,
     *,
     column: str | None,
+    mapping: dict[str, str] | None = None,
     apply: bool,
     **_: Any,
 ) -> dict[str, Any]:
@@ -455,12 +532,14 @@ def _op_drop_column(
             "message_en": "Name the column to drop.",
             "message_ar": "سمّي العمود اللي عايز تمسحه.",
         }
-    if _norm_col(target) in _PROTECTED_DROP or len(df.columns) <= 2:
+    mapped = _mapped_source_names(mapping)
+    protected = _protect_key(target) in _PROTECTED_DROP or target in mapped
+    if protected or len(df.columns) <= 2:
         return {
             "ok": False,
             "error_code": "protected_column",
-            "message_en": f"Refusing to drop protected/critical column {target!r}.",
-            "message_ar": f"مش هقدر أمسح العمود الحساس {target}.",
+            "message_en": f"Refusing to drop protected/mapped column {target!r}.",
+            "message_ar": f"مش هقدر أمسح العمود الحساس/المربوط {target}.",
             "column": target,
         }
     out = df.drop(columns=[target])
@@ -482,8 +561,10 @@ def _op_drop_column(
 def _op_rename_column(
     df: pd.DataFrame,
     *,
+    meta: UploadSessionMeta | None = None,
     column: str | None,
     rename_to: str | None,
+    mapping: dict[str, str] | None = None,
     apply: bool,
     **_: Any,
 ) -> dict[str, Any]:
@@ -516,6 +597,15 @@ def _op_rename_column(
     }
     if apply:
         preview["dataframe"] = out
+        # Keep session mapping pointed at the new source header.
+        src_map = dict(mapping or (meta.column_mapping if meta else None) or {})
+        if src_map:
+            updated = {
+                canon: (new_name if src == target else src) for canon, src in src_map.items()
+            }
+            if meta is not None:
+                meta.column_mapping = updated
+            preview["mapping_updated"] = True
     return preview
 
 
@@ -609,17 +699,8 @@ def _op_fill_constant(
     return preview
 
 
-def parse_transform_intent(
-    question: str, *, pending: dict[str, Any] | None = None
-) -> dict[str, Any] | None:
-    """Heuristic intent parser for grounded fallback (AR/EN)."""
-    q = (question or "").strip()
-    if not q:
-        return None
-    q_low = q.lower()
-
-    # Bare confirm of a previous preview
-    if pending and q_low in {
+_BARE_CONFIRM = frozenset(
+    {
         "apply",
         "do it",
         "confirm",
@@ -633,11 +714,51 @@ def parse_transform_intent(
         "أيوه",
         "ايوه",
         "تمام",
-    }:
+    }
+)
+
+
+def _threshold_from_question(q: str, *, default: float = 1000.0) -> float:
+    """Prefer a number near comparison words; else default (avoid years/counts)."""
+    compact = q.replace(",", "")
+    near = re.search(
+        r"(?:[><≥≤]|أكبر من|اكبر من|أكبر|اكبر|فوق|أكثر من|اكثر من|"
+        r"above|greater than|over|more than|at least|>=|>)\s*"
+        r"(\d+(?:\.\d+)?)",
+        compact,
+        re.I,
+    )
+    if near:
+        return float(near.group(1))
+    trailing = re.search(
+        r"(\d+(?:\.\d+)?)\s*(?:جنيه|جنية|EGP|GBP|USD|EUR|SAR|AED)?\s*$",
+        compact,
+        re.I,
+    )
+    if trailing:
+        return float(trailing.group(1))
+    # Explicit thousand words without digits
+    if any(k in q for k in ("ألف", "الف", "thousand")):
+        return 1000.0
+    return default
+
+
+def parse_transform_intent(
+    question: str, *, pending: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
+    """Heuristic intent parser for grounded fallback (AR/EN)."""
+    q = (question or "").strip()
+    if not q:
+        return None
+    q_low = q.lower()
+
+    # Bare confirm of a previous preview
+    if pending and q_low in _BARE_CONFIRM:
         out = dict(pending)
         out["confirm_apply"] = True
         return out
 
+    # Imperative apply cues (exclude op verbs that also describe the transform).
     apply_words = (
         "طبّق",
         "طبق",
@@ -645,34 +766,40 @@ def parse_transform_intent(
         "نفذ",
         "اعمل",
         "اعملي",
-        "ضيف",
-        "أضف",
-        "حط",
-        "حطّ",
-        "امسح",
-        "شِيل",
-        "شيل",
-        "احذف",
         "apply",
         "do it",
         "please do",
-        "add ",
-        "create ",
-        "remove ",
-        "strip ",
-        "delete ",
-        "drop ",
+        "please apply",
     )
     wants_apply = any(w in q_low or w in q for w in apply_words)
+    # Explicit strip/add/drop verbs imply apply when paired with a clear op below.
+    imperative_mutate = any(
+        w in q_low or w in q
+        for w in (
+            "شيل الساعة",
+            "امسح الساعة",
+            "إمسح الساعة",
+            "strip time",
+            "remove time",
+            "ضيف عمود",
+            "أضف عمود",
+            "add a column",
+            "add column",
+            "add a boolean",
+            "create a flag",
+        )
+    )
+    wants_apply = wants_apply or imperative_mutate
 
-    # Strip time from dates
-    if any(
+    # Strip time from dates — require an explicit strip/remove cue + date cue.
+    strip_cue = any(
         k in q_low or k in q
         for k in (
-            "الساعة",
-            "الوقت",
-            "وقت من",
+            "شيل الساعة",
+            "امسح الساعة",
+            "إمسح الساعة",
             "من غير وقت",
+            "من غير الساعة",
             "تاريخ فقط",
             "date only",
             "strip time",
@@ -681,53 +808,50 @@ def parse_transform_intent(
             "time of day",
             "hour from",
             "from timestamp",
-            "timestamp",
-            "شيل الساعة",
-            "امسح الساعة",
-            "إمسح الساعة",
         )
-    ) and any(
+    )
+    date_cue = any(
         k in q_low or k in q
-        for k in (
-            "تاريخ",
-            "date",
-            "timestamp",
-            "وقت",
-            "ساعة",
-            "datetime",
-            "invoice",
-            "فاتور",
-        )
-    ):
+        for k in ("تاريخ", "date", "datetime", "timestamp", "invoice date", "تاريخ الفاتور")
+    )
+    if strip_cue and date_cue:
         return {"op": "strip_time", "confirm_apply": wants_apply}
 
-    # Invoice flag / boolean column
-    if (
-        any(k in q_low or k in q for k in ("عمود", "column", "flag", "boolean", "true"))
-        or any(k in q for k in ("أضف", "ضيف", "حط"))
-    ) and any(
+    # Invoice flag / boolean column — need column/flag language + value comparison.
+    col_cue = any(
         k in q_low or k in q
         for k in (
-            "1000",
-            "ألف",
-            "الف",
+            "عمود",
+            "column",
+            "flag",
+            "boolean",
+            "true/false",
+            "true false",
+            "علم",
+        )
+    )
+    value_cue = any(
+        k in q_low or k in q
+        for k in (
             "أكبر",
             "اكبر",
             "فوق",
+            "أكثر",
+            "اكثر",
             "above",
             "greater",
             "over ",
+            "more than",
             ">",
-            "فاتور",
-            "invoice",
+            "1000",
+            "ألف",
+            "الف",
         )
-    ):
-        thr = 1000.0
-        m = re.search(r"(\d+(?:\.\d+)?)", q.replace(",", ""))
-        if m:
-            thr = float(m.group(1))
+    )
+    invoice_cue = any(k in q_low or k in q for k in ("فاتور", "invoice", "order total", "إجمالي"))
+    if col_cue and value_cue and (invoice_cue or "true" in q_low):
+        thr = _threshold_from_question(q, default=1000.0)
         new_col = None
-        # optional "named X"
         named = re.search(
             r"(?:اسمه|اسمها|name(?:d)?|called)\s+[\"']?([A-Za-z0-9_\u0600-\u06FF]+)[\"']?",
             q,
@@ -745,7 +869,6 @@ def parse_transform_intent(
     if any(k in q_low for k in ("drop column", "delete column", "remove column")) or (
         any(k in q for k in ("امسح عمود", "احذف عمود", "شيل عمود"))
     ):
-        # try to pick a quoted column
         quoted = re.search(r"[\"']([^\"']+)[\"']", q)
         return {
             "op": "drop_column",
@@ -753,7 +876,18 @@ def parse_transform_intent(
             "confirm_apply": wants_apply,
         }
 
-    if "rename" in q_low or "سمّي" in q or "سمي العمود" in q:
-        return {"op": "rename_column", "confirm_apply": False}
+    # Rename only when both sides are present (avoid intercepting vague "rename" asks).
+    rename_m = re.search(
+        r"(?:rename|سمّي|سمي)\s+[\"']?([^\"'\s]+)[\"']?\s+(?:to|→|->|ل|إلى|الى)\s+[\"']?([^\"'\s]+)[\"']?",
+        q,
+        re.I,
+    )
+    if rename_m:
+        return {
+            "op": "rename_column",
+            "column": rename_m.group(1),
+            "rename_to": rename_m.group(2),
+            "confirm_apply": wants_apply,
+        }
 
     return None
