@@ -47,8 +47,9 @@ def main() -> int:
         page = browser.new_page(viewport={"width": 1440, "height": 900})
         for name, path in PAGES.items():
             url = f"{BASE.rstrip('/')}{path}"
-            page.goto(url, wait_until="networkidle", timeout=120_000)
-            page.wait_for_timeout(1500)
+            # Streamlit keeps a WebSocket open, so networkidle never settles.
+            page.goto(url, wait_until="domcontentloaded", timeout=120_000)
+            page.wait_for_timeout(2500)
             out = OUT / name
             page.screenshot(path=str(out), full_page=True)
             print(f"wrote {out}")
