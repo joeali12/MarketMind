@@ -5,9 +5,9 @@ import { LangChrome } from "@/components/LangChrome";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "MarketMind",
+  title: "MarketMind — Retail Intelligence",
   description:
-    "Calm retail customer analytics — upload your file and talk through it",
+    "Graduation product for SME retailers: upload sales data, clean it, and explore segmentation & CLV in Arabic or English",
   icons: { icon: "/icon.svg", shortcut: "/icon.svg" },
 };
 

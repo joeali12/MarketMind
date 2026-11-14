@@ -6,7 +6,7 @@ MarketMind groups customers with RFM + K-Means and estimates eligible spend in t
 
 ## Product UI (primary)
 
-Local **Next.js** (`web/`) + **FastAPI** (`api/`). Top navigation, Arabic RTL / English LTR. Demo data is **UK Online Retail II in GBP**. Boundaries and upload privacy: `docs/frontend_backend_split.md`.
+Local **Next.js** (`web/`) + **FastAPI** (`api/`). Arabic RTL / English LTR. Entry is a bilingual landing at `/` with CTA **يلا جرب** → `/upload`. Demo data is **UK Online Retail II in GBP**. Boundaries and upload privacy: `docs/frontend_backend_split.md`.
 
 ```bash
 source .venv/bin/activate

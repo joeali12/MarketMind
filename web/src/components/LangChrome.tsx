@@ -12,6 +12,7 @@ export function LangChrome() {
   const { mode, sessionId, currencyCode } = useDataSource();
   const pathname = usePathname();
   const uploadActive = mode === "upload" && Boolean(sessionId);
+  const onLanding = pathname === "/";
 
   const links = uploadActive
     ? [
@@ -20,12 +21,20 @@ export function LangChrome() {
         { href: "/products", label: lang === "ar" ? "المنتجات" : "Products" },
         { href: "/groups", label: lang === "ar" ? "المجموعات" : "Groups" },
       ]
-    : [{ href: "/upload", label: lang === "ar" ? "ارفع ملف" : "Upload" }];
+    : onLanding
+      ? [
+          { href: "/#how-title", label: lang === "ar" ? "كيف تستخدمه" : "How to use" },
+          { href: "/#why-title", label: lang === "ar" ? "ليه مهم" : "Why it matters" },
+        ]
+      : [
+          { href: "/", label: lang === "ar" ? "الرئيسية" : "Home" },
+          { href: "/upload", label: lang === "ar" ? "ارفع ملف" : "Upload" },
+        ];
 
   return (
-    <header className="lang-chrome">
+    <header className={`lang-chrome${onLanding ? " lang-chrome-landing" : ""}`}>
       <div className="lang-chrome-inner">
-        <BrandLogo compact={uploadActive} />
+        <BrandLogo href="/" compact={uploadActive} />
         <nav
           className="lang-chrome-nav"
           aria-label={lang === "ar" ? "تنقل" : "Navigation"}
@@ -34,7 +43,15 @@ export function LangChrome() {
             <Link
               key={l.href}
               href={l.href}
-              className={pathname === l.href || pathname.startsWith(l.href + "/") ? "is-active" : undefined}
+              className={
+                l.href === "/"
+                  ? pathname === "/"
+                    ? "is-active"
+                    : undefined
+                  : pathname === l.href || pathname.startsWith(l.href + "/")
+                    ? "is-active"
+                    : undefined
+              }
             >
               {l.label}
             </Link>
@@ -60,6 +77,11 @@ export function LangChrome() {
                 ? ` · ${currencyCode}`
                 : ""}
             </span>
+          )}
+          {onLanding && (
+            <Link href="/upload" className="btn btn-cta btn-sm lang-chrome-cta">
+              {lang === "ar" ? "يلا جرب" : "Let’s try"}
+            </Link>
           )}
           <div className="lang-switch" role="group" aria-label="Language">
             <button

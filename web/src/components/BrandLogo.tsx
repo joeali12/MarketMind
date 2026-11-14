@@ -9,7 +9,7 @@ type Props = {
 };
 
 /** MarketMind wordmark + chart-mind mark. */
-export function BrandLogo({ href = "/upload", compact = false }: Props) {
+export function BrandLogo({ href = "/", compact = false }: Props) {
   const { t, lang } = useLang();
   return (
     <Link href={href} className={`brand${compact ? " brand-compact" : ""}`} aria-label={t("brand")}>
