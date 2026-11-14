@@ -8,6 +8,7 @@ import { SourceBadge } from "@/components/SourceSelector";
 import { BarSeriesChart } from "@/components/charts/BarSeriesChart";
 import { useLang } from "@/context/LangContext";
 import { useDataSource } from "@/context/DataSourceContext";
+import { isUploadSessionGoneError } from "@/lib/dataSource";
 
 type Seg = {
   cluster_id: number;
@@ -35,7 +36,7 @@ const AR_LABELS: Record<string, string> = {
 
 export default function GroupsPage() {
   const { t, lang } = useLang();
-  const { ready, mode, sessionId, currencyCode } = useDataSource();
+  const { ready, mode, sessionId, currencyCode, clearUpload } = useDataSource();
   const [segments, setSegments] = useState<Seg[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [isUpload, setIsUpload] = useState(false);
@@ -52,8 +53,14 @@ export default function GroupsPage() {
         setSegments((d.segments as Seg[]) || []);
         setIsUpload(d.demo === false);
       })
-      .catch((e) => setErr(String(e.message || e)));
-  }, [ready, mode, sessionId]);
+      .catch((e) => {
+        if (mode === "upload" && isUploadSessionGoneError(e)) {
+          clearUpload();
+          return;
+        }
+        setErr(String(e.message || e));
+      });
+  }, [ready, mode, sessionId, clearUpload]);
 
   const moneyCode = isUpload ? currencyCode : "GBP";
   const unit =

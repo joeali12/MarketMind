@@ -8,6 +8,7 @@ import { DemoBadge } from "@/components/DemoBadge";
 import { SourceBadge } from "@/components/SourceSelector";
 import { useLang } from "@/context/LangContext";
 import { useDataSource } from "@/context/DataSourceContext";
+import { isUploadSessionGoneError } from "@/lib/dataSource";
 
 type Cust = {
   customer_id: number;
@@ -22,7 +23,7 @@ export default function GroupCustomersPage() {
   const params = useParams();
   const id = Number(params.id);
   const { t, lang } = useLang();
-  const { ready, mode, sessionId, currencyCode } = useDataSource();
+  const { ready, mode, sessionId, currencyCode, clearUpload } = useDataSource();
   const [rows, setRows] = useState<Cust[]>([]);
   const [total, setTotal] = useState(0);
   const [isUpload, setIsUpload] = useState(false);
@@ -41,8 +42,14 @@ export default function GroupCustomersPage() {
       setRows((d.customers as Cust[]) || []);
       setTotal(Number(d.total || 0));
       setIsUpload(d.demo === false);
-    }).catch((e) => setError(String(e.message || e)));
-  }, [ready, id, mode, sessionId]);
+    }).catch((e) => {
+      if (mode === "upload" && isUploadSessionGoneError(e)) {
+        clearUpload();
+        return;
+      }
+      setError(String(e.message || e));
+    });
+  }, [ready, id, mode, sessionId, clearUpload]);
 
   const moneyCode = isUpload ? currencyCode : "GBP";
 
