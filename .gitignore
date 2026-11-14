@@ -78,3 +78,6 @@ web/out/
 .cache/
 testsprite_tests/tmp/
 testsprite_tests/tmp/config.json
+
+# Local stress / scratch uploads (not for git)
+testdata/

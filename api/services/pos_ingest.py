@@ -20,7 +20,13 @@ def read_excel_sheet(
     sheet_name: str | int | None = 0,
     nrows: int | None = None,
 ) -> pd.DataFrame:
-    return pd.read_excel(path, sheet_name=sheet_name if sheet_name is not None else 0, nrows=nrows)
+    # dtype=str where possible so long IDs typed as numbers in Excel stay textual.
+    return pd.read_excel(
+        path,
+        sheet_name=sheet_name if sheet_name is not None else 0,
+        nrows=nrows,
+        dtype=str,
+    )
 
 
 def _try_read_csv(
@@ -31,12 +37,15 @@ def _try_read_csv(
     nrows: int | None,
 ) -> pd.DataFrame | None:
     try:
+        # dtype=str avoids float coercion of long IDs / stock codes before mapping.
         return pd.read_csv(
             path,
             encoding=encoding,
             sep=sep,
             engine="python" if sep is None else "c",
             nrows=nrows,
+            dtype=str,
+            keep_default_na=False,
             on_bad_lines="skip",
         )
     except Exception:  # noqa: BLE001
@@ -44,7 +53,11 @@ def _try_read_csv(
 
 
 def read_csv_flexible(path: Path | str, *, nrows: int | None = None) -> pd.DataFrame:
-    """Try common encodings and delimiters (comma, semicolon, tab) including BOM/UTF-16."""
+    """Try common encodings and delimiters (comma, semicolon, tab) including BOM/UTF-16.
+
+    All cells are read as strings so long customer/stock IDs are not corrupted by
+    float64 parsing; numeric typing happens later in canonicalize_frame.
+    """
     encodings = ("utf-8-sig", "utf-8", "utf-16", "utf-16-le", "cp1256", "latin-1")
     seps: list[str | None] = [",", ";", "\t", None]  # None → python sniffer
     last_err: Exception | None = None
@@ -57,6 +70,8 @@ def read_csv_flexible(path: Path | str, *, nrows: int | None = None) -> pd.DataF
                     sep=sep if sep is not None else None,
                     engine="python",
                     nrows=nrows,
+                    dtype=str,
+                    keep_default_na=False,
                     on_bad_lines="skip",
                 )
             except Exception as exc:  # noqa: BLE001

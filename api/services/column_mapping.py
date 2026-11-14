@@ -87,8 +87,13 @@ _ALIAS_TABLE: list[tuple[str, str, float, str]] = [
     ("clientid", "customer_id", 0.9, "alias"),
     ("buyer id", "customer_id", 0.85, "alias"),
     ("رقم الزبون", "customer_id", 0.95, "ar"),
+    ("رقم العميل", "customer_id", 0.95, "ar"),
     ("كود الزبون", "customer_id", 0.9, "ar"),
+    ("كود العميل", "customer_id", 0.9, "ar"),
     ("العميل", "customer_id", 0.78, "ar"),
+    ("custid", "customer_id", 0.92, "alias"),
+    ("cust id", "customer_id", 0.92, "alias"),
+    ("cust_id", "customer_id", 0.92, "alias"),
     # product code
     ("stockcode", "stock_code", 1.0, "exact"),
     ("stock code", "stock_code", 1.0, "exact"),
@@ -98,18 +103,23 @@ _ALIAS_TABLE: list[tuple[str, str, float, str]] = [
     ("product code", "stock_code", 0.9, "alias"),
     ("product_code", "stock_code", 0.9, "alias"),
     ("كود المنتج", "stock_code", 0.95, "ar"),
+    ("كود الصنف", "stock_code", 0.95, "ar"),
     ("رمز الصنف", "stock_code", 0.9, "ar"),
+    ("رمز المنتج", "stock_code", 0.9, "ar"),
     # description / name
     ("description", "description", 1.0, "exact"),
     ("item", "description", 0.88, "alias"),
     ("item name", "description", 0.95, "alias"),
     ("item_name", "description", 0.95, "alias"),
+    ("name", "description", 0.9, "alias"),
     ("product", "description", 0.85, "alias"),
     ("product name", "description", 0.95, "alias"),
     ("product_name", "description", 0.95, "alias"),
     ("product description", "description", 0.95, "alias"),
     ("اسم المنتج", "description", 0.95, "ar"),
     ("وصف المنتج", "description", 0.95, "ar"),
+    ("الوصف", "description", 0.95, "ar"),
+    ("وصف", "description", 0.9, "ar"),
     ("الصنف", "description", 0.88, "ar"),
     # quantity
     ("quantity", "quantity", 1.0, "exact"),
@@ -153,6 +163,8 @@ _ALIAS_TABLE: list[tuple[str, str, float, str]] = [
     # country
     ("country", "country", 1.0, "exact"),
     ("الدولة", "country", 0.9, "ar"),
+    ("البلد", "country", 0.95, "ar"),
+    ("بلد", "country", 0.88, "ar"),
     # currency column
     ("currency", "row_currency", 1.0, "exact"),
     ("curr", "row_currency", 0.85, "alias"),
@@ -457,7 +469,8 @@ def parse_canonical_types(
     out["quantity"] = pd.to_numeric(out.get("quantity"), errors="coerce")
     out["unit_price"] = pd.to_numeric(out.get("unit_price"), errors="coerce")
     mapped_line = pd.to_numeric(out.get("line_amount"), errors="coerce") if "line_amount" in out.columns else None
-    # customer_id: preserve losslessly — numeric only when every non-empty value parses
+    # customer_id: always keep as string. Casting to float/int loses precision for
+    # long digit IDs and scientific-notation POS exports (e.g. 19-digit barcodes).
     cid_raw = out.get("customer_id")
     if cid_raw is not None:
         as_str = cid_raw.astype("string").str.strip()
@@ -466,12 +479,7 @@ def parse_canonical_types(
             | (as_str == "")
             | as_str.str.lower().isin(["nan", "none", "<na>"])
         )
-        as_num = pd.to_numeric(as_str.where(~blank), errors="coerce")
-        non_empty = ~blank
-        if non_empty.any() and bool(as_num[non_empty].notna().all()):
-            out["customer_id"] = as_num
-        else:
-            out["customer_id"] = as_str.where(non_empty, pd.NA)
+        out["customer_id"] = as_str.where(~blank, pd.NA)
     else:
         out["customer_id"] = pd.Series([pd.NA] * n, dtype="string")
     out["country"] = _as_str("country")

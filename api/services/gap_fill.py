@@ -78,7 +78,11 @@ def _unambiguous_description(descs: pd.Series) -> tuple[str | None, dict[str, An
 
 
 def _serialize_customer_id(val: Any) -> int | float | str | None:
-    """Keep alphanumeric customer IDs as strings; numeric IDs stay numbers."""
+    """Serialize customer IDs without float precision loss.
+
+    Alphanumeric and long digit / scientific-notation IDs stay strings.
+    Only short integer-like values (≤15 digits) may be returned as int.
+    """
     if val is None or (isinstance(val, float) and pd.isna(val)):
         return None
     try:
@@ -91,15 +95,32 @@ def _serialize_customer_id(val: Any) -> int | float | str | None:
     if isinstance(val, int):
         return int(val)
     if isinstance(val, float):
-        return int(val) if val.is_integer() else float(val)
+        # Already lost precision if huge; keep as int only when safe.
+        if val.is_integer() and abs(val) < 1e15:
+            return int(val)
+        return repr(val) if abs(val) >= 1e15 else float(val)
     text = str(val).strip()
     if not text or text.lower() in {"nan", "none", "<na>"}:
         return None
+    if any(ch in text.lower() for ch in ("e+", "e-", "e")) and _looks_scientific(text):
+        return text
+    if text.lstrip("-").isdigit():
+        digits = text.lstrip("-")
+        if len(digits) <= 15:
+            return int(text)
+        return text
     try:
         num = float(text)
-        return int(num) if num.is_integer() else num
     except ValueError:
         return text
+    if num.is_integer() and abs(num) < 1e15 and "e" not in text.lower():
+        return int(num)
+    return text
+
+
+def _looks_scientific(text: str) -> bool:
+    t = text.lower().replace("+", "").replace("-", "")
+    return "e" in t and t.replace("e", "").replace(".", "").isdigit()
 
 
 def _line_amount_complete(row: pd.Series) -> bool:
@@ -334,15 +355,34 @@ def apply_patches_to_source(
         if value is None or value == "":
             continue
 
-        if field in {"quantity", "unit_price", "customer_id"}:
+        if field in {"quantity", "unit_price"}:
             try:
                 value = float(value)
             except (TypeError, ValueError):
                 continue
+        elif field == "customer_id":
+            # Keep IDs textual — never float-cast (precision / alphanumeric).
+            value = str(value).strip()
+            if not value:
+                continue
         else:
             value = str(value)
 
-        out.at[loc, src_col] = value
+        # Source frames may be all-string (CSV/Excel dtype=str). Match dtype on write.
+        col_dtype = out[src_col].dtype
+        if pd.api.types.is_string_dtype(col_dtype) or str(col_dtype) in {
+            "string",
+            "object",
+            "str",
+        }:
+            if value is None or (isinstance(value, float) and pd.isna(value)):
+                continue
+            value = str(value)
+        try:
+            out.at[loc, src_col] = value
+        except (TypeError, ValueError):
+            out[src_col] = out[src_col].astype(object)
+            out.at[loc, src_col] = value
         applied.append(
             {
                 "row_index": int(idx),
