@@ -71,7 +71,9 @@ This is the real upload → mapping → cleaning → store analytics product (`w
 
 Streamlit serves the academic multipage app (`app_pages/*`) required by the project PDF (segments, CLV, model quality). It is **not** the Next.js product UI. Optional Stitch HTML (`?stitch=1`) is a static export only.
 
-Deployed from `joeali12/MarketMind` · `main` · `app.py` · Python 3.12 · no secrets.
+Deployed from `joeali12/MarketMind` · `main` · `app.py` · Python 3.12 · no secrets. Anonymous access works (`viewerAuthEnabled=false`). LinkedIn/CV drafts stay unpublished.
+
+The Cloud app reads committed artifacts and the small derived parquet files in `docs/deployment.md`. It does not need `data/raw/online_retail_II.xlsx`.
 
 ## Screenshots (current product UI)
 
@@ -182,7 +184,7 @@ Units: **eligible positive spend** over 90 days in **GBP (£)** (UCI dataset des
 - High zero-target rates in the academic 90-day window
 - Target is eligible positive spend (D5), not net revenue after refunds
 - Currency GBP (£) for demo from UCI description; uploads never assume EGP/GBP/USD from filename
-- Not a commercial multi-tenant SaaS; product UI on Vercel + API; Streamlit Cloud is PDF-only at https://marketmind-grad.streamlit.app/ (LinkedIn still unpublished)
+- Not a commercial multi-tenant SaaS; product UI on Vercel + API; Streamlit Cloud is PDF-only at https://marketmind-grad.streamlit.app/ (D8 Streamlit approved; LinkedIn still unpublished)
 
 ## Docs
 
