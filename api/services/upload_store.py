@@ -50,6 +50,16 @@ class UploadSessionMeta:
     profile_confirmed: bool = False
     # User preference after confirm: None | "manual" | "smart"
     gap_fill_preference: str | None = None
+    # POS mapping: canonical field → source column name (session-scoped).
+    column_mapping: dict | None = None
+    mapping_confirmed: bool = False
+    # Excel worksheet selection (required when workbook has multiple sheets).
+    selected_sheet: str | None = None
+    workbook_sheets: list | None = None
+    # When a currency column has multiple codes, user must pick one for totals.
+    analysis_currency_filter: str | None = None
+    # Cleaning proposal ids the user accepted for this session (dashboard/export).
+    accepted_cleaning_ids: list | None = None
 
 
 def _session_dir(session_id: str) -> Path:
@@ -312,13 +322,25 @@ def write_export(session_id: str, content: bytes, name: str = "cleaned.csv") -> 
     return out
 
 
+def effective_currency_code(meta: UploadSessionMeta) -> str | None:
+    """Currency that labels filtered totals (analysis filter wins when set)."""
+    filt = (meta.analysis_currency_filter or "").strip().upper()
+    if filt:
+        return filt
+    code = (meta.currency_code or "").strip().upper()
+    if code and code != "UNSPECIFIED":
+        return code
+    return None
+
+
 def currency_label(meta: UploadSessionMeta) -> str:
     """Human label for UI — never default uploaded amounts to GBP."""
-    if not meta.currency_code or meta.currency_code == "UNSPECIFIED":
+    code = effective_currency_code(meta)
+    if not code:
         return "source currency (not selected)"
-    if meta.currency_code == "OTHER":
+    if code == "OTHER":
         return "other (user-selected)"
-    return meta.currency_code
+    return code
 
 
 def safe_log_outcome(

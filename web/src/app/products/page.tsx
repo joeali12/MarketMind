@@ -38,23 +38,38 @@ export default function ProductsPage() {
           ? "عملة المصدر"
           : "source currency";
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
       if (!ready) return;
+      setLoadError(null);
       if (mode === "upload" && sessionId) {
-        const d = await api.uploadProducts(sessionId);
-        if (cancelled) return;
-        setSource("upload");
-        setProducts((d.products as Prod[]) || []);
-        setTrend((d.monthly_trend as Trend[]) || []);
-        setCategories((d.categories as Cat[]) || []);
-        setCategoryAvailable(Boolean(d.category_available));
-        setReason(
-          lang === "ar"
-            ? String(d.category_omitted_reason_ar || "")
-            : String(d.category_omitted_reason_en || "")
-        );
+        try {
+          const d = await api.uploadProducts(sessionId);
+          if (cancelled) return;
+          setSource("upload");
+          setProducts((d.products as Prod[]) || []);
+          setTrend((d.monthly_trend as Trend[]) || []);
+          setCategories((d.categories as Cat[]) || []);
+          setCategoryAvailable(Boolean(d.category_available));
+          setReason(
+            lang === "ar"
+              ? String(d.category_omitted_reason_ar || "")
+              : String(d.category_omitted_reason_en || "")
+          );
+        } catch (e) {
+          if (cancelled) return;
+          // Keep upload mode visible — never silently show demo badge/data.
+          setSource("upload");
+          setProducts([]);
+          setTrend([]);
+          setCategories([]);
+          setCategoryAvailable(false);
+          setReason("");
+          setLoadError(e instanceof Error ? e.message : String(e));
+        }
         return;
       }
 
@@ -82,9 +97,16 @@ export default function ProductsPage() {
       {source === "upload" ? <SourceBadge /> : <DemoBadge />}
       <h1 className="page-title display">{t("card_products")}</h1>
       <p className="page-sub">{t("card_products_body")}</p>
+      {loadError && (
+        <p className="muted" role="alert" style={{ marginTop: 8 }}>
+          {lang === "ar"
+            ? `تعذر تحميل منتجات الملف المرفوع: ${loadError}`
+            : `Could not load products for the uploaded file: ${loadError}`}
+        </p>
+      )}
 
       <section className="band-muted band">
-        <h2 className="display" style={{ marginTop: 0, fontSize: "1.2rem" }}>
+        <h2 className="section-title display">
           {lang === "ar" ? "تصنيف المنتجات" : "Product categories"}
         </h2>
         {!categoryAvailable && (

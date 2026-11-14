@@ -174,14 +174,14 @@
   "notes": [
     "Segment names are descriptive labels from RFM profile medians; not approved personas.",
     "Segment actions are provisional heuristics only (D7); actions_approved=false \u2014 not approved business policy.",
-    "Eligible-spend policy (D5): cancellations starting with C and non-positive quantities excluded; target is eligible positive spend, not net revenue after refunds.",
+    "Eligible-spend policy (D5): cancellations matching conservative C#### / C-\u2026 (is_cancellation_invoice) and non-positive quantities excluded; target is eligible positive spend, not net revenue after refunds.",
     "Currency (D6): GBP (\u00a3) per UCI dataset description; no FX conversion; currency_confirmed=true.",
-    "Deployment (D1/D8): preferred host Streamlit Community Cloud; public publish not approved.",
+    "Deployment (D1/D8): preferred host Streamlit Community Cloud (PDF); public publish not approved until a live URL exists.",
     "Do not load these joblib files from untrusted sources."
   ],
   "deployment": {
     "preferred_host": "streamlit_community_cloud",
     "public_publish_approved": false,
-    "note": "D1 preference set; D8 publish not approved \u2014 do not deploy externally."
+    "note": "D1 preference Streamlit Community Cloud (PDF); D8 publish not approved \u2014 do not record a public URL until the Cloud app is live and checked."
   }
 }

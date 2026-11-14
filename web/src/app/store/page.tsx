@@ -6,6 +6,7 @@ import { api, formatMoney } from "@/lib/api";
 import { DemoBadge } from "@/components/DemoBadge";
 import { SourceBadge } from "@/components/SourceSelector";
 import { BarSeriesChart } from "@/components/charts/BarSeriesChart";
+import { PageSkeleton } from "@/components/PageSkeleton";
 import { useLang } from "@/context/LangContext";
 import { useDataSource } from "@/context/DataSourceContext";
 
@@ -22,6 +23,7 @@ export default function StorePage() {
 
   useEffect(() => {
     if (!ready) return;
+    let cancelled = false;
     setData(null);
     setProducts(null);
     setErr(null);
@@ -33,16 +35,30 @@ export default function StorePage() {
     const loadProducts = isUpload
       ? api.uploadProducts(sessionId as string)
       : api.products();
-    Promise.all([loadOverview, loadProducts.catch(() => null)])
-      .then(([ov, prod]) => {
+    loadOverview
+      .then((ov) => {
+        if (cancelled) return;
         setData(ov);
-        setProducts(prod);
+        setLoading(false);
       })
-      .catch((e) => setErr(String(e.message || e)))
-      .finally(() => setLoading(false));
+      .catch((e) => {
+        if (!cancelled) setErr(String(e.message || e));
+        if (!cancelled) setLoading(false);
+      });
+    loadProducts
+      .then((prod) => {
+        if (!cancelled) setProducts(prod);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, [mode, sessionId, ready]);
 
-  const metrics = (data?.metrics || {}) as Record<string, number | string | null>;
+  const metrics = (data?.metrics || {}) as Record<
+    string,
+    number | string | boolean | null | undefined
+  >;
   const evidence = (data?.evidence_insights || []) as {
     id: string;
     title_en: string;
@@ -129,9 +145,14 @@ export default function StorePage() {
           : t("card_store_body")}
       </p>
 
-      {loading && <p className="muted">{t("loading")}</p>}
+      {loading && (
+        <PageSkeleton
+          variant="dashboard"
+          label={lang === "ar" ? "جاري تحميل اللوحة…" : t("loading")}
+        />
+      )}
       {err && (
-        <p className="muted" style={{ color: "var(--danger)" }}>
+        <p className="muted" style={{ color: "var(--danger)" }} role="alert">
           {t("error")}: {err}
           {mode === "upload" && (
             <>
@@ -147,43 +168,95 @@ export default function StorePage() {
         </p>
       )}
 
-      {data && (
+      {!loading && data && (
         <>
           <div className="grid-4" data-testid="store-kpi-row">
-            <div className="kpi kpi-accent">
+            <div className="kpi kpi-accent" data-testid="store-kpi-sales">
               <div className="label">{t("sales")}</div>
-              <div className="value">
+              <div
+                className="value"
+                data-testid="store-kpi-sales-value"
+                aria-label={
+                  lang === "ar"
+                    ? `مبيعات مؤهلة ${formatMoney(sales, lang, displayCurrency)}`
+                    : `Eligible sales ${formatMoney(sales, lang, displayCurrency)}`
+                }
+              >
                 {formatMoney(sales, lang, displayCurrency)}
               </div>
             </div>
             <div className="kpi">
               <div className="label">{t("orders")}</div>
-              <div className="value">{Number(metrics.orders || 0).toLocaleString()}</div>
+              <div className="value">
+                {metrics.orders_available === false || metrics.orders == null
+                  ? lang === "ar"
+                    ? "غير متاح"
+                    : "N/A"
+                  : Number(metrics.orders || 0).toLocaleString("en-GB")}
+              </div>
             </div>
             <div className="kpi">
               <div className="label">{t("customers")}</div>
               <div className="value">
-                {Number(metrics.customers || 0).toLocaleString()}
+                {metrics.customers_available === false || metrics.customers == null
+                  ? lang === "ar"
+                    ? "غير متاح"
+                    : "N/A"
+                  : Number(metrics.customers || 0).toLocaleString("en-GB")}
               </div>
             </div>
             <div className="kpi">
               <div className="label">{t("aov")}</div>
-              <div className="value">{formatMoney(aov, lang, displayCurrency)}</div>
+              <div className="value">
+                {aov == null || Number.isNaN(aov) || metrics.orders_available === false
+                  ? lang === "ar"
+                    ? "غير متاح"
+                    : "N/A"
+                  : formatMoney(aov, lang, displayCurrency)}
+              </div>
             </div>
           </div>
 
+          {(() => {
+            const exclusion = data?.currency_exclusion as
+              | {
+                  blank_or_unknown_excluded?: number;
+                  other_currency_excluded?: number;
+                  reason_en?: string;
+                  reason_ar?: string;
+                }
+              | undefined;
+            const excluded =
+              Number(exclusion?.blank_or_unknown_excluded || 0) +
+              Number(exclusion?.other_currency_excluded || 0);
+            if (!excluded) return null;
+            return (
+              <p className="muted" data-testid="currency-exclusion-note" style={{ fontSize: 13, marginTop: 8 }}>
+                {lang === "ar" ? exclusion?.reason_ar : exclusion?.reason_en}
+              </p>
+            );
+          })()}
+
           <p className="muted" style={{ fontSize: 13, marginTop: 12 }}>
-            {t("returning")}: {(returning * 100).toFixed(1)}% —{" "}
-            {lang === "ar"
-              ? defs.returning_customer_ar || t("returning_help")
-              : defs.returning_customer_en || t("returning_help")}
+            {metrics.customers_available === false || metrics.returning_customer_share == null
+              ? lang === "ar"
+                ? "نسبة الراجعين مش متاحة — مفيش رقم زبون مربوط في الملف ده."
+                : "Returning-customer share unavailable — no customer ID mapped in this file."
+              : (
+                <>
+                  {t("returning")}: {(returning * 100).toFixed(1)}% —{" "}
+                  {lang === "ar"
+                    ? defs.returning_customer_ar || t("returning_help")
+                    : defs.returning_customer_en || t("returning_help")}
+                </>
+              )}
           </p>
 
           <div className="dash-grid">
             <section className="band dash-span-2" data-testid="store-trend-card">
               <div className="band-head">
-                <h2 className="display" style={{ fontSize: "1.2rem" }}>
-                  {lang === "ar" ? "اتجاه المصروف" : "Sales trend"}
+                <h2 className="section-title display">
+                  {lang === "ar" ? "اتجاه المبيعات والطلبات" : "Sales & order volume trends"}
                 </h2>
                 <div className="range-switch" role="group" aria-label={lang === "ar" ? "المدى" : "Range"}>
                   {(
@@ -229,8 +302,8 @@ export default function StorePage() {
 
             <section className="band" data-testid="store-products-card">
               <div className="band-head">
-                <h2 className="display" style={{ fontSize: "1.15rem" }}>
-                  {lang === "ar" ? "أداء المنتجات" : "Product performance"}
+                <h2 className="section-title display">
+                  {lang === "ar" ? "أعلى المنتجات أداءً" : "Top performing products"}
                 </h2>
                 <Link href="/products" style={{ fontSize: 13 }}>
                   {lang === "ar" ? "عرض الكل" : "View all"}
@@ -259,7 +332,7 @@ export default function StorePage() {
             </section>
 
             <section className="band" data-testid="store-evidence-insights">
-              <h2 className="display" style={{ marginTop: 0, fontSize: "1.15rem" }}>
+              <h2 className="section-title display">
                 {lang === "ar" ? "إيه اللي اتغيّر / إيه اللي يهم" : "What changed / what to consider"}
               </h2>
               {evidence.length > 0 ? (
@@ -291,7 +364,7 @@ export default function StorePage() {
 
           {steps.length > 0 && (
             <section className="band" data-testid="store-suggested-steps">
-              <h2 className="display" style={{ marginTop: 0, fontSize: "1.2rem" }}>
+              <h2 className="section-title display">
                 {lang === "ar" ? "اقتراحات قرار (مؤقتة)" : "Decision suggestions (provisional)"}
               </h2>
               <p className="muted" style={{ fontSize: 13 }}>
@@ -315,7 +388,7 @@ export default function StorePage() {
 
           {isUpload && deepDives.length > 0 && (
             <section className="band" data-testid="store-optional-deep-dives">
-              <h2 className="display" style={{ marginTop: 0, fontSize: "1.15rem" }}>
+              <h2 className="section-title display">
                 {lang === "ar" ? "تحليل أعمق (اختياري)" : "Optional deeper analysis"}
               </h2>
               <ul style={{ margin: 0, paddingInlineStart: "1.2rem" }}>
@@ -338,7 +411,7 @@ export default function StorePage() {
 
           {isUpload && (
             <section className="band">
-              <h2 className="display" style={{ marginTop: 0, fontSize: "1.2rem" }}>
+              <h2 className="section-title display">
                 {forecast.available
                   ? lang === "ar"
                     ? "تقدير ٩٠ يوم (خاص بالرفع)"

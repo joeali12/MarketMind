@@ -13,7 +13,7 @@ Status codes: **PASS** (verified by code/run), **PARTIAL**, **BLOCKED** (externa
 | Model evaluation + limitations | PASS | Model quality page + model card |
 | Notebook Restart & Run All | PASS | `nbconvert --execute` 0 errors (2026-11-06) |
 | joblib artifacts for inference | PASS | artifacts/; app loads; no silent retrain |
-| Public deploy | PARTIAL | D1/D8 approved 2026-11-11 for Streamlit Community Cloud; no live URL yet |
+| Public deploy | BLOCKED | D1 prefers Next.js+FastAPI product host; D8 publish not approved — prep only |
 | README with results + credit | PASS | README table from metadata; live URL pending |
 | Presentation 10–12 slides | PASS | `docs/presentation_outline.md` draft |
 | LinkedIn/CV | PASS | drafts only; unpublished |
@@ -37,9 +37,11 @@ Status codes: **PASS** (verified by code/run), **PARTIAL**, **BLOCKED** (externa
 
 | Item | Status | Notes |
 |---|---|---|
-| Demo mode | PASS | Home button → customer lookup |
-| Upload validation | PASS | schema errors without crash |
-| Dates/units/limitations | PASS | captions; GBP (£) confirmed (D6); eligible positive spend (D5) |
+| Product UI | PASS | Next.js `web/` + FastAPI `api/` (primary). Streamlit = legacy/academic only |
+| Demo mode | PASS | UK GBP demo tables; selector never mixes with upload |
+| Upload journey | PASS | sheet → mapping → currency/date → cleaning → upload `/store` |
+| POS schema matrix | PASS | fixtures in `tests/fixtures/client_uploads/` + matrix tests |
+| Dates/units/limitations | PASS | captions; demo GBP (D6); eligible positive spend (D5); uploads never assume currency |
 | Missing artifacts error | PASS | `ArtifactError` + home warning |
 | Heuristics not as policy | PASS | `actions_approved=false` + warnings |
 
@@ -49,5 +51,8 @@ Status codes: **PASS** (verified by code/run), **PARTIAL**, **BLOCKED** (externa
 |---|---|---|
 | Schema/cleaning/RFM/target | PASS | pytest |
 | Leakage / model / artifacts | PASS | `test_models_and_leakage.py` |
-| Streamlit start smoke | PASS | HTTP 200 local |
-| Screenshot materials | PASS | `docs/screenshots/*.png` captured from local app 2026-11-06 |
+| Client upload matrix + mapping | PASS | `test_client_upload_matrix.py`, `test_column_mapping.py` |
+| Playwright upload journeys | PASS | Egypt + POS schemas (`test_web_*.py`); Gemini mocked |
+| Next.js production build | PASS | `cd web && npm run build` |
+| Streamlit start smoke | PASS | HTTP 200 local (legacy UI) |
+| Screenshot materials | PASS | `docs/screenshots/` + `docs/screenshots/e2e/` |

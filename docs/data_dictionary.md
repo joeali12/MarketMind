@@ -31,7 +31,7 @@
 
 | Field | Description |
 |---|---|
-| `is_cancellation` | True if `invoice` uppercased starts with `C`. |
+| `is_cancellation` | True if `invoice` matches the conservative cancellation pattern `C####` or `C-…` (see `is_cancellation_invoice`); not every code that merely starts with letter `C` (e.g. `CAI-…` stays a sale). |
 | `line_amount` | `quantity * unit_price` in source units (no FX conversion). |
 | `_source_sheet` | Sheet name the row was loaded from. |
 
@@ -39,5 +39,5 @@
 
 - UCI card names (`InvoiceNo`, `UnitPrice`, `CustomerID`) differ from the Excel headers above. MarketMind maps the **Excel** headers.
 - Currency display: **GBP (£)** per UCI dataset description (`CURRENCY_CONFIRMED=true`); no FX conversion (D6).
-- Modeling target uses **eligible positive spend** (D5): excludes cancellation invoices starting with `C` and non-positive quantities — not net revenue after refunds.
+- Modeling target uses **eligible positive spend** (D5): excludes cancellation invoices matching `C####` / `C-…` and non-positive quantities — not net revenue after refunds.
 - Approximate card figure of ~1M transactions matches the confirmed total row count of **1,067,371** across both sheets.

@@ -110,10 +110,19 @@ def browser_page(web_base_url: str):
     from playwright.sync_api import sync_playwright
 
     exe = _chrome_executable()
+    if not exe:
+        pytest.skip(
+            "Playwright Chromium binary not found. "
+            "Install with: pip install -r requirements-dev.txt && playwright install chromium "
+            "(or set PLAYWRIGHT_CHROME_EXECUTABLE). "
+            "CI sets SKIP_WEB_SMOKE=1 to skip this suite."
+        )
     with sync_playwright() as p:
-        launch_kwargs: dict = {"headless": True, "args": ["--no-sandbox"]}
-        if exe:
-            launch_kwargs["executable_path"] = exe
+        launch_kwargs: dict = {
+            "headless": True,
+            "args": ["--no-sandbox"],
+            "executable_path": exe,
+        }
         browser = p.chromium.launch(**launch_kwargs)
         page = browser.new_page(viewport={"width": 1280, "height": 900})
         yield page, web_base_url
@@ -131,14 +140,17 @@ def test_web_no_aside_rtl_ltr_upload_chat(browser_page):
     main = page.locator("main").inner_text()
     assert "ارفع" in main or "نضّف" in main or "Upload" in main
 
-    page.get_by_role("button", name="English").click()
+    page.get_by_role("button", name="EN", exact=True).click()
     page.wait_for_timeout(300)
     assert html.get_attribute("dir") == "ltr"
-    assert page.get_by_text("Upload · ask · clean · analyse").count() >= 1
+    expect_hero = page.get_by_test_id("upload-hero-title")
+    assert expect_hero.count() >= 1
+    assert "Understand your customers" in expect_hero.inner_text()
     # File input present for the chat-first upload journey
     assert page.locator('input[type="file"]').count() >= 1
 
-    page.get_by_role("button", name="العربية").click()
+    page.get_by_role("button", name="عربي", exact=True).click()
     page.wait_for_timeout(300)
     assert page.locator("html").get_attribute("dir") == "rtl"
     assert page.locator("aside").count() == 0
+    assert "افهم زبائنك" in page.get_by_test_id("upload-hero-title").inner_text()

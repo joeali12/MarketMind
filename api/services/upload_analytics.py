@@ -11,10 +11,43 @@ from typing import Any
 import pandas as pd
 
 from api.services import cleaning_proposals as clean_svc
+from api.services import canonical_upload
 from api.services import upload_forecast
-from api.services.upload_store import UploadSessionMeta, currency_label, load_meta, upload_path
-from marketmind.config import SOURCE_COLUMN_MAP
-from marketmind.data.cleaning import eligible_positive_spend_mask
+from api.services.gap_fill import _serialize_customer_id
+from api.services.upload_store import (
+    UploadSessionMeta,
+    currency_label,
+    effective_currency_code,
+    load_meta,
+    upload_path,
+)
+
+
+def _provisional_upload_action(row: Any) -> dict[str, Any] | None:
+    """Heuristic next step from upload segment label — never approved policy (D7)."""
+    label = str(getattr(row, "segment_label", "") or "")
+    raw = None
+    if "high" in label.lower() or "recent" in label.lower():
+        raw = (
+            "Consider a thank-you / retention touch for recent higher-spend customers "
+            "(heuristic from this upload only)."
+        )
+    elif "low" in label.lower() or "lapsed" in label.lower():
+        raw = (
+            "Consider cautious re-engagement; expected spend may be low "
+            "(heuristic from this upload only)."
+        )
+    elif label:
+        raw = f"Review this descriptive group ({label}) before spending budget."
+    if not raw:
+        return None
+    return {
+        "provisional": True,
+        "label_en": "Provisional suggested action (not approved for operations)",
+        "label_ar": "اقتراح إجراء مؤقت (مش معتمد للتشغيل)",
+        "raw": raw,
+        "segment_label": label or None,
+    }
 
 
 def _envelope(meta: UploadSessionMeta, **extra: Any) -> dict[str, Any]:
@@ -32,6 +65,8 @@ def _envelope(meta: UploadSessionMeta, **extra: Any) -> dict[str, Any]:
         "date_format_confirmed": meta.date_format_confirmed,
         "has_category_mapped": meta.has_category_mapped,
         "category_column": meta.category_column,
+        "mapping_confirmed": bool(meta.mapping_confirmed),
+        "selected_sheet": meta.selected_sheet,
         "forecast_scope": None,
         "forecast_available": False,
         **extra,
@@ -39,43 +74,72 @@ def _envelope(meta: UploadSessionMeta, **extra: Any) -> dict[str, Any]:
 
 
 def load_parsed_frame(meta: UploadSessionMeta, *, nrows: int | None = 100_000) -> pd.DataFrame:
-    path = upload_path(meta.session_id)
-    df = clean_svc.read_upload_dataframe(path, nrows=nrows)
-    validation = clean_svc.validate_upload_frame(df)
-    if not validation["ok"]:
-        raise ValueError(validation["message"])
-
-    rename = {src: canon for canon, src in SOURCE_COLUMN_MAP.items()}
-    working = df.rename(columns=rename)[list(SOURCE_COLUMN_MAP.keys())].copy()
-    parsed = clean_svc.parse_upload_types(working, date_format=meta.date_format)
-    if meta.has_category_mapped and meta.category_column and meta.category_column in df.columns:
-        parsed["category"] = df[meta.category_column].astype("string").values
-    return parsed
+    return canonical_upload.load_canonical_frame(meta, nrows=nrows, require_mapping=True)
 
 
 def require_analysis_ready(meta: UploadSessionMeta) -> None:
-    """Block silent analysis when date format is still ambiguous."""
-    path = upload_path(meta.session_id)
-    df = clean_svc.read_upload_dataframe(path, nrows=500)
-    amb = clean_svc.validate_upload_frame(df).get("date_format") or {}
+    """Block silent analysis when sheet/mapping/date/currency gates are unmet."""
+    if canonical_upload.needs_sheet_selection(meta):
+        raise ValueError(
+            "Select which Excel worksheet contains the sales rows before analysing this file."
+        )
+    validation = canonical_upload.validate_for_upload(meta)
+    if validation.get("needs_user_mapping") and not validation.get("mapping_confirmed"):
+        raise ValueError(
+            "Confirm column mapping for this file before analysing."
+        )
+    if not validation.get("ok"):
+        raise ValueError(validation.get("message") or "Upload mapping is incomplete.")
+    amb = validation.get("date_format") or {}
     if amb.get("needs_confirmation") and not meta.date_format_confirmed:
         raise ValueError(
             "Confirm the invoice date format on the Upload page before analysing this file."
+        )
+    if not meta.currency_code or meta.currency_code == "UNSPECIFIED":
+        # Allow only when an explicit single currency column already seeded the code
+        raise ValueError(
+            "Select the currency for monetary amounts before analysing this file."
+        )
+    if validation.get("multi_currency") and not meta.analysis_currency_filter:
+        codes = validation.get("discovered_currencies") or []
+        raise ValueError(
+            "This file has multiple currencies ("
+            + ", ".join(codes)
+            + "). Choose one currency for totals — no hidden FX conversion."
         )
 
 
 def overview(meta: UploadSessionMeta) -> dict[str, Any]:
     require_analysis_ready(meta)
     parsed = load_parsed_frame(meta)
-    eligible = parsed.loc[eligible_positive_spend_mask(parsed)]
-    orders = int(eligible["invoice"].nunique())
-    customers = int(eligible["customer_id"].dropna().nunique())
+    eligible = parsed.loc[canonical_upload.eligible_for_upload(parsed)]
+    has_invoice = bool(
+        meta.column_mapping and meta.column_mapping.get("invoice")
+    ) or ("invoice" in parsed.columns and not parsed["invoice"].astype(str).str.startswith("ROW-").all())
+    # Detect synthetic ROW-* invoices from unmapped invoice field
+    real_invoices = ~parsed["invoice"].astype(str).str.match(r"^ROW-", na=False)
+    order_available = bool(real_invoices.any())
+    orders = (
+        int(
+            eligible.loc[
+                real_invoices.reindex(eligible.index).fillna(False), "invoice"
+            ].nunique()
+        )
+        if order_available
+        else None
+    )
+    has_customer = bool(parsed["customer_id"].notna().any())
+    customers = int(eligible["customer_id"].dropna().nunique()) if has_customer else 0
     sales = float(eligible["line_amount"].fillna(0).sum())
-    aov = float(sales / orders) if orders else 0.0
-    inv_per = eligible.dropna(subset=["customer_id"]).groupby("customer_id")["invoice"].nunique()
-    returning_share = float((inv_per > 1).mean()) if len(inv_per) else 0.0
-    date_min = str(eligible["invoice_date"].min()) if len(eligible) else None
-    date_max = str(eligible["invoice_date"].max()) if len(eligible) else None
+    aov = float(sales / orders) if orders else None
+    if has_customer and order_available:
+        inv_per = eligible.dropna(subset=["customer_id"]).groupby("customer_id")["invoice"].nunique()
+        returning_share = float((inv_per > 1).mean()) if len(inv_per) else 0.0
+    else:
+        returning_share = None
+    date_ok = bool(eligible["invoice_date"].notna().any())
+    date_min = str(eligible["invoice_date"].min()) if date_ok else None
+    date_max = str(eligible["invoice_date"].max()) if date_ok else None
 
     trend = []
     if len(eligible) and eligible["invoice_date"].notna().any():
@@ -93,28 +157,91 @@ def overview(meta: UploadSessionMeta) -> dict[str, Any]:
             for r in trend_df.itertuples()
         ]
 
-    rfm = _customer_rfm(eligible)
-    segments_payload = _segment_rows(rfm)
+    rfm = _customer_rfm(eligible) if has_customer else eligible.iloc[0:0].copy()
+    segments_payload = _segment_rows(rfm) if has_customer else []
     insights = _evidence_insights(
         eligible=eligible,
         trend=trend,
         rfm=rfm,
         segments=segments_payload,
-        returning_share=returning_share,
+        returning_share=returning_share if returning_share is not None else 0.0,
         currency=currency_label(meta),
-        has_category=bool(meta.has_category_mapped and "category" in eligible.columns),
+        has_category=bool(
+            (meta.has_category_mapped or (meta.column_mapping or {}).get("category"))
+            and "category" in eligible.columns
+        ),
         meta=meta,
     )
+    if not has_customer:
+        insights.insert(
+            0,
+            {
+                "id": "no_customer_id",
+                "title_en": "Customer groups unavailable",
+                "title_ar": "مجموعات الزبائن مش متاحة",
+                "evidence_en": (
+                    "This file has no usable customer identifier. Store and product sales "
+                    "totals still include anonymous lines; customer-level analytics cannot run."
+                ),
+                "evidence_ar": (
+                    "الملف مفيهوش رقم زبون صالح. إجماليات المبيعات والمنتجات لسه محسوبة "
+                    "(بما فيها المبيعات المجهولة)، لكن تحليل الزبائن مش هيشتغل."
+                ),
+                "caveat_en": "Map a customer/client ID column if you need groups or returning rates.",
+                "caveat_ar": "اربط عمود رقم زبون/عميل لو محتاج مجموعات أو نسبة راجعين.",
+            },
+        )
+    exclusion = dict(parsed.attrs.get("currency_exclusion") or {})
+    if int(exclusion.get("blank_or_unknown_excluded") or 0) or int(
+        exclusion.get("other_currency_excluded") or 0
+    ):
+        insights.insert(
+            0,
+            {
+                "id": "currency_rows_excluded",
+                "title_en": "Some rows are outside this currency total",
+                "title_ar": "صفوف خارج إجمالي العملة دي",
+                "evidence_en": exclusion.get("reason_en"),
+                "evidence_ar": exclusion.get("reason_ar"),
+                "caveat_en": "No exchange-rate conversion is applied.",
+                "caveat_ar": "مفيش تحويل سعر صرف.",
+            },
+        )
+    if not date_ok:
+        insights.insert(
+            0,
+            {
+                "id": "no_dates",
+                "title_en": "Trends unavailable",
+                "title_ar": "الاتجاهات مش متاحة",
+                "evidence_en": "No usable transaction dates are mapped, so monthly trends are disabled.",
+                "evidence_ar": "مفيش تواريخ معاملات مربوطة بشكل صالح، فاتجاهات الشهور متعطّلة.",
+                "caveat_en": "Map and confirm a date column to enable trends.",
+                "caveat_ar": "اربط وأكّد عمود التاريخ عشان الاتجاهات تشتغل.",
+            },
+        )
+    if not order_available:
+        insights.append(
+            {
+                "id": "no_invoice",
+                "title_en": "Order counts unavailable",
+                "title_ar": "عدد الطلبات مش متاح",
+                "evidence_en": "No invoice/order identifier is mapped — rows are not treated as orders.",
+                "evidence_ar": "مفيش رقم فاتورة/طلب مربوط — الصفوف مش بتتحسب كطلبات.",
+                "caveat_en": "Map an order/invoice column to enable order counts and AOV.",
+                "caveat_ar": "اربط عمود طلب/فاتورة عشان عدد الطلبات ومتوسط قيمة الطلب.",
+            }
+        )
     suggestions = _provisional_steps_from_insights(
         insights,
-        has_category=bool(meta.has_category_mapped),
+        has_category=bool(meta.has_category_mapped or (meta.column_mapping or {}).get("category")),
         segments=segments_payload,
     )
     forecast_raw = upload_forecast.evaluate_upload_forecast(parsed, meta)
     forecast = upload_forecast.public_forecast_payload(forecast_raw)
     # Segments stay available for /groups explorers but are not forced on the store hero.
     deep_dives: list[dict[str, Any]] = []
-    if segments_payload and customers >= 5:
+    if has_customer and segments_payload and customers >= 5:
         biggest = max(segments_payload, key=lambda s: int(s.get("n_customers") or 0))
         deep_dives.append(
             {
@@ -136,43 +263,76 @@ def overview(meta: UploadSessionMeta) -> dict[str, Any]:
             }
         )
 
+    if returning_share is not None:
+        meaning = {
+            "en": (
+                f"About {(returning_share * 100):.0f}% of customers with IDs placed more than one order "
+                f"in this file (returning-customer share). This describes history in the upload only — "
+                "not a causal claim."
+            ),
+            "ar": (
+                f"حوالي {(returning_share * 100):.0f}% من الزباين اللي ليهم رقم عملوا أكتر من طلب "
+                "في الملف ده (نسبة الزباين الراجعين). ده وصف للتاريخ في الرفع فقط — مش ادعاء سببية."
+            ),
+        }
+    elif not has_customer:
+        meaning = {
+            "en": (
+                "Customer-level analytics are unavailable because no customer ID is mapped. "
+                "Store and product totals still use every eligible sales line, including anonymous ones."
+            ),
+            "ar": (
+                "تحليل الزبائن مش متاح لأن مفيش رقم زبون مربوط. "
+                "إجماليات المتجر والمنتجات لسه بتحسب كل سطور البيع المؤهلة، بما فيها المجهولة."
+            ),
+        }
+    else:
+        meaning = {
+            "en": "Sales figures come from the mapped columns in this upload only.",
+            "ar": "أرقام المبيعات جاية من الأعمدة المربوطة في الرفع ده فقط.",
+        }
+
     return _envelope(
         meta,
         metrics={
             "sales": sales,
             "orders": orders,
-            "customers": customers,
+            "customers": customers if has_customer else None,
             "average_order_value": aov,
             "returning_customer_share": returning_share,
             "date_min": date_min,
             "date_max": date_max,
             "eligible_rows": int(len(eligible)),
-            "sales_gbp": sales if meta.currency_code == "GBP" else None,
+            "sales_gbp": sales if effective_currency_code(meta) == "GBP" else None,
+            "orders_available": order_available,
+            "customers_available": has_customer,
+            "trends_available": date_ok,
         },
-        monthly_trend=trend,
+        capabilities={
+            "sales_totals": True,
+            "product_rankings": True,
+            "date_trends": date_ok,
+            "order_counts": order_available,
+            "customer_groups": has_customer,
+            "category_analysis": bool(
+                (meta.has_category_mapped or (meta.column_mapping or {}).get("category"))
+                and "category" in eligible.columns
+            ),
+        },
+        monthly_trend=trend if date_ok else [],
         chart_units={
             "spend": currency_label(meta),
-            "orders": "orders",
+            "orders": "orders" if order_available else "unavailable",
         },
-        rfm_summary=_rfm_distribution(rfm),
+        rfm_summary=_rfm_distribution(rfm) if has_customer else {},
         # Kept for API consumers / Groups; store UI must not treat as primary.
         segment_chart=segments_payload,
         show_segment_chart_on_store=False,
         optional_deep_dives=deep_dives,
+        currency_exclusion=exclusion,
         evidence_insights=insights,
         insights=[],  # demo-style factual claims unused for uploads
-        what_this_may_mean={
-            "en": (
-                f"About {(returning_share * 100):.0f}% of customers with IDs placed more than one order "
-                f"in this file (returning-customer share). This describes history in the upload only — "
-                "not a causal claim. Use the decision suggestions below like a briefing from an analyst."
-            ),
-            "ar": (
-                f"حوالي {(returning_share * 100):.0f}% من الزباين اللي ليهم رقم عملوا أكتر من طلب "
-                "في الملف ده (نسبة الزباين الراجعين). ده وصف للتاريخ في الرفع فقط — مش ادعاء سببية. "
-                "اعتبر اقتراحات القرار تحت كإحاطة من محلّل بيانات."
-            ),
-        },
+        what_this_may_mean=meaning,
         suggested_next_steps=suggestions,
         actions_approved=False,
         forecast=forecast,
@@ -588,7 +748,7 @@ def _customer_rfm(eligible: pd.DataFrame) -> pd.DataFrame:
 def segments(meta: UploadSessionMeta) -> dict[str, Any]:
     require_analysis_ready(meta)
     parsed = load_parsed_frame(meta)
-    eligible = parsed.loc[eligible_positive_spend_mask(parsed)]
+    eligible = parsed.loc[canonical_upload.eligible_for_upload(parsed)]
     rfm = _customer_rfm(eligible)
     rows = _segment_rows(rfm)
     return _envelope(
@@ -611,14 +771,14 @@ def segment_customers(
 ) -> dict[str, Any]:
     require_analysis_ready(meta)
     parsed = load_parsed_frame(meta)
-    eligible = parsed.loc[eligible_positive_spend_mask(parsed)]
+    eligible = parsed.loc[canonical_upload.eligible_for_upload(parsed)]
     rfm = _customer_rfm(eligible)
     subset = rfm[rfm["cluster_id"] == cluster_id].sort_values("monetary", ascending=False)
     total = int(len(subset))
     page = subset.iloc[offset : offset + limit]
     customers = [
         {
-            "customer_id": int(r.customer_id) if pd.notna(r.customer_id) else None,
+            "customer_id": _serialize_customer_id(r.customer_id),
             "recency": float(r.recency),
             "frequency": float(r.frequency),
             "monetary": float(r.monetary),
@@ -640,20 +800,25 @@ def segment_customers(
 def list_customers(meta: UploadSessionMeta, *, limit: int = 100, q: str | None = None) -> dict[str, Any]:
     require_analysis_ready(meta)
     parsed = load_parsed_frame(meta)
-    eligible = parsed.loc[eligible_positive_spend_mask(parsed)]
+    eligible = parsed.loc[canonical_upload.eligible_for_upload(parsed)]
     rfm = _customer_rfm(eligible)
     if q:
+        q_text = str(q).strip()
         try:
-            qid = float(q)
-            rfm = rfm[rfm["customer_id"] == qid]
+            qid = float(q_text)
+            numeric_hit = rfm[rfm["customer_id"] == qid]
+            if len(numeric_hit):
+                rfm = numeric_hit
+            else:
+                rfm = rfm[rfm["customer_id"].astype(str) == q_text]
         except ValueError:
-            rfm = rfm.iloc[0:0]
+            rfm = rfm[rfm["customer_id"].astype(str) == q_text]
     rfm = rfm.sort_values("monetary", ascending=False).head(limit)
     return _envelope(
         meta,
         customers=[
             {
-                "customer_id": int(r.customer_id),
+                "customer_id": _serialize_customer_id(r.customer_id),
                 "recency": float(r.recency),
                 "frequency": float(r.frequency),
                 "monetary": float(r.monetary),
@@ -665,16 +830,23 @@ def list_customers(meta: UploadSessionMeta, *, limit: int = 100, q: str | None =
     )
 
 
-def customer_profile(meta: UploadSessionMeta, customer_id: int) -> dict[str, Any]:
+def customer_profile(meta: UploadSessionMeta, customer_id: int | str) -> dict[str, Any]:
     require_analysis_ready(meta)
     parsed = load_parsed_frame(meta)
-    eligible = parsed.loc[eligible_positive_spend_mask(parsed)]
+    eligible = parsed.loc[canonical_upload.eligible_for_upload(parsed)]
     rfm = _customer_rfm(eligible)
-    match = rfm[rfm["customer_id"] == float(customer_id)]
+    cid_key = _serialize_customer_id(customer_id)
+    match = rfm[rfm["customer_id"] == cid_key]
+    if match.empty:
+        # Fallback string compare for mixed dtype frames
+        match = rfm[rfm["customer_id"].astype(str) == str(customer_id)]
     if match.empty:
         raise FileNotFoundError("Customer not found in upload session")
     row = match.iloc[0]
-    hist = eligible[eligible["customer_id"] == float(customer_id)].sort_values("invoice_date")
+    hist = eligible[
+        (eligible["customer_id"] == cid_key)
+        | (eligible["customer_id"].astype(str) == str(customer_id))
+    ].sort_values("invoice_date")
     products = (
         hist.groupby(["stock_code", "description"], dropna=False)
         .agg(quantity=("quantity", "sum"), spend=("line_amount", "sum"), lines=("invoice", "nunique"))
@@ -710,7 +882,7 @@ def customer_profile(meta: UploadSessionMeta, customer_id: int) -> dict[str, Any
     return _envelope(
         meta,
         customer={
-            "customer_id": customer_id,
+            "customer_id": _serialize_customer_id(row.customer_id) or cid_key,
             "recency": float(row.recency),
             "frequency": float(row.frequency),
             "monetary": float(row.monetary),
@@ -746,7 +918,7 @@ def customer_profile(meta: UploadSessionMeta, customer_id: int) -> dict[str, Any
             "customer_history_span_days": span_days,
             "customer_order_count": n_orders,
         },
-        suggested_action=None,
+        suggested_action=_provisional_upload_action(row),
         actions_approved=False,
     )
 
@@ -755,7 +927,8 @@ def product_leaders(meta: UploadSessionMeta, *, top_n: int = 5) -> dict[str, Any
     """Deterministic top products by units and by eligible spend (upload only)."""
     require_analysis_ready(meta)
     parsed = load_parsed_frame(meta)
-    eligible = parsed.loc[eligible_positive_spend_mask(parsed)].copy()
+    # Use upload eligibility so line-total files (no unit_price) still rank products.
+    eligible = parsed.loc[canonical_upload.eligible_for_upload(parsed)].copy()
     if eligible.empty:
         return {
             "available": False,
@@ -803,11 +976,11 @@ def product_leaders(meta: UploadSessionMeta, *, top_n: int = 5) -> dict[str, Any
         "top_by_revenue": by_revenue[0] if by_revenue else None,
         "measure_note_en": (
             "Units = sum of eligible quantity; revenue = sum of eligible line spend "
-            "(quantity × unit price), cancellations excluded."
+            "(mapped line total, or quantity × unit price), cancellations excluded."
         ),
         "measure_note_ar": (
             "الكمية = مجموع الكمية المؤهلة؛ الإيراد = مجموع مصروف السطر المؤهل "
-            "(كمية × سعر)، مع استبعاد الإلغاءات."
+            "(إجمالي سطر مربوط، أو كمية × سعر)، مع استبعاد الإلغاءات."
         ),
     }
 
@@ -815,7 +988,7 @@ def product_leaders(meta: UploadSessionMeta, *, top_n: int = 5) -> dict[str, Any
 def products(meta: UploadSessionMeta, *, limit: int = 30) -> dict[str, Any]:
     require_analysis_ready(meta)
     parsed = load_parsed_frame(meta)
-    eligible = parsed.loc[eligible_positive_spend_mask(parsed)].copy()
+    eligible = parsed.loc[canonical_upload.eligible_for_upload(parsed)].copy()
 
     by_product = (
         eligible.groupby(["stock_code", "description"], dropna=False)

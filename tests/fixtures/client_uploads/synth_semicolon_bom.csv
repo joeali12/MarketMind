@@ -1,0 +1,3 @@
+﻿order_id;order_date;item;qty;unit_price;customer_id
+S1;01/02/2024;Oil;2;30;7
+S2;02/02/2024;Oil;1;30;8

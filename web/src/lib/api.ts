@@ -49,20 +49,12 @@ export function formatMoney(
   currencyCode: string | null | undefined
 ): string {
   const locale = lang === "ar" ? "ar-EG" : "en-GB";
-  if (currencyCode && currencyCode !== "UNSPECIFIED" && currencyCode !== "OTHER") {
-    try {
-      return new Intl.NumberFormat(locale, {
-        style: "currency",
-        currency: currencyCode,
-        maximumFractionDigits: 0,
-      }).format(amount);
-    } catch {
-      /* fall through */
-    }
-  }
-  const n = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(amount);
+  const n = new Intl.NumberFormat(locale, {
+    numberingSystem: "latn",
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(amount) ? amount : 0);
   if (!currencyCode || currencyCode === "UNSPECIFIED") {
     return `${n} (source)`;
   }
-  return `${n} ${currencyCode}`;
+  return `${currencyCode} ${n}`;
 }

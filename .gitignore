@@ -36,6 +36,8 @@ data/processed/*
 !data/processed/customer_test.parquet
 !data/processed/pca_train.parquet
 !data/processed/test_predictions.parquet
+# Compact customer-history sample so demo API works after a clean clone.
+!data/processed/transactions_demo_sample.parquet
 # Upload temp sessions (privacy)
 data/uploads/tmp/*
 !data/uploads/tmp/.gitkeep
@@ -69,9 +71,13 @@ Thumbs.db
 # Next.js
 web/node_modules/
 web/.next/
+web/.next.*/
 web/out/
 
 # Hugging Face / deploy caches
 .cache/
 testsprite_tests/tmp/
 testsprite_tests/tmp/config.json
+
+# Local stress / scratch uploads (not for git)
+testdata/

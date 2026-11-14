@@ -14,13 +14,11 @@ _SLASH_DATE = re.compile(r"^\s*\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}\s*$")
 _ISO_DATE = re.compile(r"^\s*\d{4}[-/]\d{1,2}[-/]\d{1,2}")
 
 
-def read_upload_dataframe(path, *, nrows: int | None = None) -> pd.DataFrame:
-    suffix = str(path).lower()
-    if suffix.endswith(".csv"):
-        return pd.read_csv(path, nrows=nrows)
-    if suffix.endswith(".xlsx"):
-        return pd.read_excel(path, nrows=nrows)
-    raise ValueError("Unsupported file type")
+def read_upload_dataframe(path, *, nrows: int | None = None, sheet_name: str | None = None) -> pd.DataFrame:
+    """Backward-compatible reader; prefer canonical_upload.read_raw_source for sessions."""
+    from api.services import pos_ingest
+
+    return pos_ingest.read_upload_source(path, sheet_name=sheet_name, nrows=nrows)
 
 
 def detect_category_column(columns: list[str]) -> str | None:
@@ -60,8 +58,12 @@ def detect_date_format_ambiguity(series: pd.Series, *, sample: int = 200) -> dic
             "options": ["dayfirst", "monthfirst", "iso"],
         }
 
-    dayfirst = pd.to_datetime(slash_like, errors="coerce", dayfirst=True)
-    monthfirst = pd.to_datetime(slash_like, errors="coerce", dayfirst=False)
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        dayfirst = pd.to_datetime(slash_like, errors="coerce", dayfirst=True)
+        monthfirst = pd.to_datetime(slash_like, errors="coerce", dayfirst=False)
     both_ok = dayfirst.notna() & monthfirst.notna()
     disagree = both_ok & (dayfirst.dt.normalize() != monthfirst.dt.normalize())
     ambiguous = int(disagree.sum())
@@ -158,12 +160,28 @@ def validate_upload_frame(df: pd.DataFrame) -> dict[str, Any]:
     }
 
 
-def _eligible_mask(parsed: pd.DataFrame) -> pd.Series:
-    return (
-        (~parsed["is_cancellation"])
-        & (parsed["quantity"] > 0)
-        & (parsed["unit_price"] >= 0)
+def _line_amount_money_mode(parsed: pd.DataFrame) -> bool:
+    """True when money comes from mapped line totals (unit_price unused/absent)."""
+    if "line_amount" not in parsed.columns:
+        return False
+    if "money_source" in parsed.columns:
+        src = parsed["money_source"].astype("string")
+        return bool(src.notna().any()) and not bool(src.eq("qty_x_unit_price").any())
+    return bool(parsed["line_amount"].notna().any()) and (
+        "unit_price" not in parsed.columns or bool(parsed["unit_price"].isna().all())
     )
+
+
+def _eligible_mask(parsed: pd.DataFrame) -> pd.Series:
+    cancel = (
+        ~parsed["is_cancellation"]
+        if "is_cancellation" in parsed.columns
+        else pd.Series(True, index=parsed.index)
+    )
+    if _line_amount_money_mode(parsed):
+        qty_ok = parsed["quantity"].isna() | (parsed["quantity"] > 0)
+        return cancel & qty_ok & (parsed["line_amount"].fillna(0) > 0)
+    return cancel & (parsed["quantity"] > 0) & (parsed["unit_price"] >= 0)
 
 
 def _estimate_impact(parsed: pd.DataFrame, drop_mask: pd.Series) -> dict[str, Any]:
@@ -184,36 +202,83 @@ def build_proposals(
     date_format: str | None = None,
     currency_code: str | None = None,
     category_column: str | None = None,
+    column_mapping: dict[str, str] | None = None,
+    parsed_override: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
     """Propose deterministic cleaning steps with impact estimates.
 
     Unresolved values remain visible; no IDs/names/amounts are invented.
     Destructive proposals default to not accepted.
+
+    Prefer `parsed_override` from canonical_upload.load_canonical_frame when available.
     """
-    validation = validate_upload_frame(df)
-    if not validation["ok"]:
-        return {
-            "validation": validation,
-            "proposals": [],
-            "unresolved_preview": [],
-            "baseline": {},
+    from api.services import column_mapping as cmap
+
+    if parsed_override is not None:
+        parsed = parsed_override.copy()
+        validation = {
+            "ok": True,
+            "message": "Using session-confirmed column mapping.",
+            "missing_columns": [],
+            "extra_columns": [],
+            "detected_category_column": category_column,
+            "category_available": bool(category_column) or "category" in parsed.columns,
+            "columns": list(df.columns),
+            "row_count": int(len(df)),
+            "date_format": {"needs_confirmation": False, "options": ["dayfirst", "monthfirst", "iso"]},
         }
+    elif column_mapping:
+        caps = cmap.assess_capabilities(column_mapping)
+        if not caps["analysis_ready_minimum"]:
+            return {
+                "validation": {
+                    "ok": False,
+                    "message": caps.get("message_en"),
+                    "missing_columns": [],
+                    "extra_columns": [],
+                },
+                "proposals": [],
+                "unresolved_preview": [],
+                "baseline": {},
+            }
+        canonical = cmap.apply_mapping_to_frame(df, column_mapping)
+        parsed = cmap.parse_canonical_types(canonical, date_format=date_format)
+        validation = {
+            "ok": True,
+            "message": "Mapped columns ready.",
+            "missing_columns": [],
+            "extra_columns": [c for c in df.columns if c not in column_mapping.values()],
+            "detected_category_column": category_column or column_mapping.get("category"),
+            "category_available": "category" in parsed.columns,
+            "columns": list(df.columns),
+            "row_count": int(len(df)),
+            "date_format": {"needs_confirmation": False, "options": ["dayfirst", "monthfirst", "iso"]},
+        }
+    else:
+        validation = validate_upload_frame(df)
+        if not validation["ok"]:
+            return {
+                "validation": validation,
+                "proposals": [],
+                "unresolved_preview": [],
+                "baseline": {},
+            }
 
-    rename = {src: canon for canon, src in SOURCE_COLUMN_MAP.items()}
-    working = df.rename(columns=rename)
-    keep = list(SOURCE_COLUMN_MAP.keys())
-    cat = category_column or validation.get("detected_category_column")
-    if cat and cat in df.columns and cat not in rename:
-        working["category"] = df[cat]
-        keep = keep + ["category"]
-    working = working[[c for c in keep if c in working.columns]].copy()
+        rename = {src: canon for canon, src in SOURCE_COLUMN_MAP.items()}
+        working = df.rename(columns=rename)
+        keep = list(SOURCE_COLUMN_MAP.keys())
+        cat = category_column or validation.get("detected_category_column")
+        if cat and cat in df.columns and cat not in rename:
+            working["category"] = df[cat]
+            keep = keep + ["category"]
+        working = working[[c for c in keep if c in working.columns]].copy()
 
-    parsed = parse_upload_types(
-        working[[c for c in SOURCE_COLUMN_MAP.keys() if c in working.columns]],
-        date_format=date_format,
-    )
-    if "category" in working.columns:
-        parsed["category"] = working["category"].values
+        parsed = parse_upload_types(
+            working[[c for c in SOURCE_COLUMN_MAP.keys() if c in working.columns]],
+            date_format=date_format,
+        )
+        if "category" in working.columns:
+            parsed["category"] = working["category"].values
 
     baseline_rows = int(len(parsed))
     baseline_spend = float(
@@ -241,17 +306,39 @@ def build_proposals(
             }
         )
 
-    bad_qty_price = parsed["quantity"].isna() | parsed["unit_price"].isna()
-    if int(bad_qty_price.sum()):
-        impact = _estimate_impact(parsed, bad_qty_price)
+    if _line_amount_money_mode(parsed):
+        bad_money = parsed["line_amount"].isna()
+        money_title_en = "Drop rows with missing line total"
+        money_title_ar = "احذف الصفوف الناقص فيها إجمالي السطر"
+        money_reason_en = (
+            "Mapped line totals are treated as complete monetary values; "
+            "missing line amounts are not invented from quantity × unit price."
+        )
+        money_reason_ar = (
+            "إجمالي السطر المربوط بيتعامل كقيمة نقدية كاملة؛ "
+            "المبالغ الناقصة مش هتتخمّن من كمية × سعر."
+        )
+    else:
+        bad_money = parsed["quantity"].isna() | parsed["unit_price"].isna()
+        money_title_en = "Drop rows with missing quantity or unit price"
+        money_title_ar = "احذف الصفوف الناقص فيها الكمية أو السعر"
+        money_reason_en = (
+            "Non-numeric or missing quantity/price after coercion. "
+            "Missing amounts are not filled in."
+        )
+        money_reason_ar = (
+            "كمية أو سعر ناقص/مش رقمي بعد التحويل. مش هنخمّن المبالغ الناقصة."
+        )
+    if int(bad_money.sum()):
+        impact = _estimate_impact(parsed, bad_money)
         proposals.append(
             {
                 "id": "drop_non_finite_qty_price",
-                "title_en": "Drop rows with missing quantity or unit price",
-                "title_ar": "احذف الصفوف الناقص فيها الكمية أو السعر",
-                "reason_en": "Non-numeric or missing quantity/price after coercion. Missing amounts are not filled in.",
-                "reason_ar": "كمية أو سعر ناقص/مش رقمي بعد التحويل. مش هنخمّن المبالغ الناقصة.",
-                "rows_affected": int(bad_qty_price.sum()),
+                "title_en": money_title_en,
+                "title_ar": money_title_ar,
+                "reason_en": money_reason_en,
+                "reason_ar": money_reason_ar,
+                "rows_affected": int(bad_money.sum()),
                 "estimated_impact": impact,
                 "invents_values": False,
                 "destructive": True,

@@ -49,7 +49,7 @@ dataframeBorderColor = "#D8DEE6"
 backgroundColor = "#FFFFFF"
 secondaryBackgroundColor = "#F6F8F7"
 textColor = "#13243A"
-primaryColor = "#0F5B5A"
+primaryColor = "#3525CD"
 borderColor = "#D8DEE6"
 
 [theme.dark]

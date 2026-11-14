@@ -24,12 +24,17 @@ Open http://127.0.0.1:3000 (rewrites `/api/*` to the API). If 3000 is busy, use 
 | `GET /api/overview` | Demo store KPIs + bilingual insights |
 | `GET /api/products` | Demo products; `category_available: false` |
 | `POST /api/upload` | Stream to tmp; byte limit while reading |
-| `POST /api/upload/settings` | Explicit `currency_code` + confirmed `date_format` |
+| `POST /api/upload/settings` | Explicit `currency_code`, confirmed `date_format`, optional `selected_sheet`, `analysis_currency_filter` |
+| `POST /api/upload/mapping` | Persist user-confirmed source→canonical column map for the session |
 | `GET /api/upload/{session_id}/profile` | Factual file summary, findings, column mapping confidence |
-| `POST /api/upload/assistant` | Grounded Q&A on the upload (no raw rows externally) |
-| `GET /api/upload/assistant/status` | Honest capability status (`grounded_facts` until a real adapter is invoked) |
-| `POST /api/upload/validate` / `cleaning-proposals` / `apply` | Deterministic cleaning; optional category map; anomaly *review flags* |
+| `POST /api/upload/assistant` | Grounded Q&A / Gemini tool-calling on the upload (no raw rows externally) |
+| `GET /api/upload/assistant/status` | `gemini` when `GEMINI_API_KEY` is set; otherwise grounded-facts fallback |
+| `POST /api/upload/validate` / `cleaning-proposals` / `apply` | Deterministic cleaning on the mapped sheet; optional category map; anomaly *review flags* |
 | `GET /api/upload/{session_id}/overview\|segments\|customers\|products` | Upload-only analysis (never demo tables) |
+
+### Upload journey (UI)
+
+`/upload`: choose CSV/XLSX → pick Excel sheet when needed → confirm mapping for unknown/ambiguous headers → confirm currency (and date format only if ambiguous) → review cleaning/gaps → open `/store` for that session. Multi-currency files require an explicit analysis currency (no FX). Rows with a blank or unknown currency are left out of that total; the UI states how many were excluded and why. Ambiguous dates are not used for trends until the user confirms the format.
 
 Cancellation rule (upload + cleaning): conservative `C####` or `C-…` (e.g. `C-RET-`). **Not** every invoice starting with letter `C` (so `CAI-…` stays a normal sale).
 

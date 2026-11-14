@@ -1,0 +1,4 @@
+TxnID,TxnDate,Product,Qty,Amount
+T1,2024-04-01,Pen,10,2.5
+T2,2024-04-02,Pad,2,15.0
+T3,2024-04-03,Pen,5,2.5

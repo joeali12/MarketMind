@@ -1,0 +1,4 @@
+Invoice,StockCode,Description,Quantity,InvoiceDate,Price,Customer ID,Country
+I1,X1,Widget,1,2024-01-10,4.5,5,UK
+I2,X2,Gadget,2,2024-01-11,9.0,6,UK
+I3,X1,Widget,1,2024-01-12,4.5,5,UK

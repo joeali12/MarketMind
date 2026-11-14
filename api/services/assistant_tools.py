@@ -29,6 +29,10 @@ _FORBIDDEN_KEYS = frozenset(
         "stockcode",
         "preview_rows",
         "raw_rows",
+        # User-controlled file metadata can embed PII — never send to the model.
+        "filename",
+        "original_filename",
+        "upload_filename",
     }
 )
 _EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
@@ -102,8 +106,15 @@ def _analysis_gate(meta: UploadSessionMeta) -> dict[str, Any] | None:
 
 
 def tool_get_upload_profile(meta: UploadSessionMeta, _args: dict[str, Any]) -> dict[str, Any]:
-    path = upload_path(meta.session_id)
-    df = clean_svc.read_upload_dataframe(path, nrows=50_000)
+    from api.services import canonical_upload
+
+    try:
+        df = canonical_upload.read_raw_source(meta, nrows=50_000)
+    except Exception:  # noqa: BLE001
+        path = upload_path(meta.session_id)
+        df = clean_svc.read_upload_dataframe(
+            path, nrows=50_000, sheet_name=meta.selected_sheet
+        )
     profile = upload_profile.build_profile(df, meta, date_format=meta.date_format)
     findings = []
     for f in (profile.get("findings") or [])[:8]:
@@ -122,7 +133,6 @@ def tool_get_upload_profile(meta: UploadSessionMeta, _args: dict[str, Any]) -> d
     return _ok(
         {
             "tool": "get_upload_profile",
-            "filename": meta.filename,
             "row_count": profile.get("row_count"),
             "column_count": profile.get("column_count"),
             "unique_customers": structure.get("unique_customers"),
@@ -336,17 +346,14 @@ def tool_get_forecast_status(meta: UploadSessionMeta, _args: dict[str, Any]) -> 
 
 def tool_get_missing_and_fill_preview(meta: UploadSessionMeta, _args: dict[str, Any]) -> dict[str, Any]:
     """Preview only — never mutates. Strips identifiers from row samples."""
-    path = upload_path(meta.session_id)
-    df = clean_svc.read_upload_dataframe(path, nrows=100_000)
-    validation = clean_svc.validate_upload_frame(df)
-    if not validation.get("ok"):
-        return _err("invalid_frame", en=str(validation.get("message")), ar="الملف مش صالح للتحليل.")
-    from marketmind.config import SOURCE_COLUMN_MAP
+    from api.services import canonical_upload
 
-    rename = {src: canon for canon, src in SOURCE_COLUMN_MAP.items()}
-    working = df.rename(columns=rename)
-    cols = [c for c in SOURCE_COLUMN_MAP if c in working.columns]
-    parsed = clean_svc.parse_upload_types(working[cols].copy(), date_format=meta.date_format)
+    try:
+        parsed = canonical_upload.load_canonical_frame(
+            meta, nrows=100_000, require_mapping=False
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _err("invalid_frame", en=str(exc), ar="الملف مش صالح للتحليل.")
     preview = gap_fill.suggest_for_parsed(parsed, limit=15)
     # Sanitize: no invoice / customer_id / stock_code values to the model
     candidates = []
@@ -378,6 +385,7 @@ def tool_get_missing_and_fill_preview(meta: UploadSessionMeta, _args: dict[str, 
             "manual_only_issue_count": manual_count,
             "smart_fillable_fields": preview.get("smart_fillable_fields"),
             "manual_only_fields": preview.get("manual_only_fields"),
+            "price_policy": preview.get("price_policy"),
             "candidates_sample": candidates[:12],
             "mutated": False,
             "note_en": preview.get("note_en"),
@@ -387,13 +395,30 @@ def tool_get_missing_and_fill_preview(meta: UploadSessionMeta, _args: dict[str, 
 
 
 def tool_get_cleaning_impact(meta: UploadSessionMeta, _args: dict[str, Any]) -> dict[str, Any]:
+    from api.services import canonical_upload
+
     path = upload_path(meta.session_id)
-    df = clean_svc.read_upload_dataframe(path, nrows=100_000)
+    try:
+        df = canonical_upload.read_raw_source(meta, nrows=100_000)
+    except Exception:  # noqa: BLE001
+        df = clean_svc.read_upload_dataframe(
+            path, nrows=100_000, sheet_name=meta.selected_sheet
+        )
+    parsed = None
+    try:
+        if meta.mapping_confirmed or meta.column_mapping:
+            parsed = canonical_upload.load_canonical_frame(
+                meta, nrows=100_000, require_mapping=False
+            )
+    except Exception:  # noqa: BLE001
+        parsed = None
     proposals = clean_svc.build_proposals(
         df,
         date_format=meta.date_format,
         currency_code=meta.currency_code,
         category_column=meta.category_column if meta.has_category_mapped else None,
+        column_mapping=meta.column_mapping,
+        parsed_override=parsed,
     )
     brief = []
     for p in (proposals.get("proposals") or [])[:8]:
@@ -431,24 +456,30 @@ def tool_apply_safe_fills(meta: UploadSessionMeta, args: dict[str, Any]) -> dict
             ar="ضع confirm_apply=true فقط بعد طلب صريح بتطبيق الملء الآمن.",
         )
     path = upload_path(meta.session_id)
-    raw = clean_svc.read_upload_dataframe(path, nrows=None)
-    from marketmind.config import SOURCE_COLUMN_MAP
+    raw = clean_svc.read_upload_dataframe(
+        path, nrows=None, sheet_name=meta.selected_sheet
+    )
+    from api.services import canonical_upload
 
-    rename = {src: canon for canon, src in SOURCE_COLUMN_MAP.items()}
-    working = raw.rename(columns=rename)
-    cols = [c for c in SOURCE_COLUMN_MAP if c in working.columns]
-    parsed = clean_svc.parse_upload_types(working[cols].copy(), date_format=meta.date_format)
+    try:
+        parsed = canonical_upload.load_canonical_frame(
+            meta, nrows=None, require_mapping=False
+        )
+    except Exception:  # noqa: BLE001
+        return _err(
+            "mapping_required",
+            en="Confirm column mapping before applying safe fills.",
+            ar="أكّد ربط الأعمدة قبل تطبيق الملء الآمن.",
+        )
     preview = gap_fill.suggest_for_parsed(parsed, limit=200)
     patches: list[dict[str, Any]] = []
     skipped_manual = 0
+    skipped_insufficient = 0
     for row in preview.get("rows") or []:
         idx = row.get("row_index")
         for field, detail in (row.get("suggestions") or {}).items():
-            if field in gap_fill.MANUAL_ONLY:
-                skipped_manual += 1
-                continue
-            if field == "quantity":
-                # Never invent transaction quantities from median patterns
+            if field in gap_fill.MANUAL_ONLY or field == "quantity":
+                # Never invent IDs/dates/invoices/quantities from patterns
                 skipped_manual += 1
                 continue
             if not isinstance(detail, dict):
@@ -462,52 +493,140 @@ def tool_apply_safe_fills(meta: UploadSessionMeta, args: dict[str, Any]) -> dict
                         "source": "smart",
                     }
                 )
+            else:
+                skipped_insufficient += 1
+
     if not patches:
         return _ok(
             {
                 "tool": "apply_safe_fills",
                 "mutated": False,
                 "applied_count": 0,
+                "fields_filled": {},
                 "skipped_manual_or_unsafe": skipped_manual,
+                "skipped_insufficient_evidence": skipped_insufficient,
+                "price_policy": preview.get("price_policy"),
                 "message_en": "No eligible safe fills to apply. Remaining blanks stay manual.",
                 "message_ar": "مفيش ملء آمن قابل للتطبيق. الفراغات المتبقية تفضل يدوي.",
             }
         )
     from api.services import upload_store
 
-    backup_path = path.with_suffix(path.suffix + ".pre_safe_fill.bak")
-    try:
-        if path.suffix.lower() == ".csv":
-            raw.to_csv(backup_path, index=False)
-        else:
-            raw.to_excel(backup_path, index=False)
-    except Exception:  # noqa: BLE001
-        backup_path = None
+    import shutil
 
-    updated, applied = gap_fill.apply_patches_to_source(raw, patches)
-    gap_fill.write_source_dataframe(path, updated)
+    backup_path = gap_fill.pre_safe_fill_backup_path(path)
+    try:
+        # Byte-identical session backup so restore does not depend on format sniffing.
+        shutil.copy2(path, backup_path)
+        if not backup_path.exists() or backup_path.stat().st_size <= 0:
+            raise OSError("backup_missing_or_empty")
+    except Exception:  # noqa: BLE001
+        return _err(
+            "backup_required",
+            en=(
+                "Could not create a restore backup for this session; "
+                "safe fills were not applied. Preview and manual review remain available."
+            ),
+            ar=(
+                "مقدرناش نعمل نسخة استرجاع للجلسة دي؛ الملء الآمن ماتطبّقش. "
+                "المعاينة والملء اليدوي لسه متاحين."
+            ),
+        )
+
+    updated, applied = gap_fill.apply_patches_to_source(
+        raw, patches, column_mapping=meta.column_mapping
+    )
+    gap_fill.write_source_dataframe(
+        path, updated, sheet_name=meta.selected_sheet
+    )
+    meta.byte_size = path.stat().st_size
+    upload_store.save_meta(meta)
+    fields_filled: dict[str, int] = {}
+    for a in applied:
+        fields_filled[a["field"]] = fields_filled.get(a["field"], 0) + 1
     upload_store.safe_log_outcome(
         meta.session_id,
         outcome="safe_fill_applied",
-        extra={"applied": len(applied), "backup": bool(backup_path)},
+        extra={"applied": len(applied), "backup": True, "fields": fields_filled},
     )
     return _ok(
         {
             "tool": "apply_safe_fills",
             "mutated": True,
             "applied_count": len(applied),
-            "applied_fields": sorted({a["field"] for a in applied}),
+            "applied_fields": sorted(fields_filled.keys()),
+            "fields_filled": fields_filled,
             "skipped_manual_or_unsafe": skipped_manual,
-            "backup_available": bool(backup_path),
+            "skipped_insufficient_evidence": skipped_insufficient,
+            "price_policy": preview.get("price_policy"),
+            "backup_available": True,
             "message_en": (
                 f"Applied {len(applied)} deterministic safe fills "
-                "(prices/descriptions with same-file evidence). "
-                "Customer IDs, dates, invoices, and quantities stay manual."
+                f"({fields_filled}). "
+                "Customer IDs, dates, invoices, and quantities stay manual. "
+                "You can undo via restore_pre_safe_fill while this session is active."
             ),
             "message_ar": (
                 f"اتطبّق {len(applied)} ملء آمن محدد "
-                "(أسعار/أوصاف بدليل من نفس الملف). "
-                "أرقام الزباين والتواريخ والفواتير والكميات تفضل يدوي."
+                f"({fields_filled}). "
+                "أرقام الزباين والتواريخ والفواتير والكميات تفضل يدوي. "
+                "تقدر ترجع بالنسخة الاحتياطية طول ما الجلسة شغالة."
+            ),
+            "refresh_hint": "reload_profile_cleaning_dashboard",
+        }
+    )
+
+
+def tool_restore_pre_safe_fill(meta: UploadSessionMeta, args: dict[str, Any]) -> dict[str, Any]:
+    """Restore the active upload file from the pre-safe-fill backup (session-scoped)."""
+    if not bool(args.get("confirm_restore")):
+        return _err(
+            "confirm_required",
+            en="Set confirm_restore=true only after the user clearly asked to undo safe fills.",
+            ar="ضع confirm_restore=true فقط بعد طلب صريح بالتراجع عن الملء الآمن.",
+        )
+    import shutil
+
+    path = upload_path(meta.session_id)
+    backup_path = gap_fill.pre_safe_fill_backup_path(path)
+    if not backup_path.exists():
+        return _err(
+            "no_backup",
+            en="No pre-fill backup exists for this upload session.",
+            ar="مفيش نسخة استرجاع قبل الملء للجلسة دي.",
+        )
+    try:
+        shutil.copy2(backup_path, path)
+        from api.services import upload_store
+
+        meta.byte_size = path.stat().st_size
+        upload_store.save_meta(meta)
+        # Count rows for the user-facing summary after a successful byte restore.
+        restored_df = clean_svc.read_upload_dataframe(path, nrows=None)
+        upload_store.safe_log_outcome(
+            meta.session_id,
+            outcome="safe_fill_restored",
+            extra={"rows": len(restored_df)},
+        )
+    except Exception:  # noqa: BLE001
+        return _err(
+            "restore_failed",
+            en="Restore failed; the current session file was left unchanged.",
+            ar="الاسترجاع فشل؛ ملف الجلسة الحالي اتساب زي ما هو.",
+        )
+    return _ok(
+        {
+            "tool": "restore_pre_safe_fill",
+            "mutated": True,
+            "restored": True,
+            "row_count": len(restored_df),
+            "message_en": (
+                "Restored the upload file from the pre-safe-fill backup for this session. "
+                "Reload profile, cleaning, and dashboard."
+            ),
+            "message_ar": (
+                "اترجع ملف الرفع من نسخة ما قبل الملء الآمن لهذه الجلسة. "
+                "حدّث الملف والتنظيف ولوحة التحليل."
             ),
             "refresh_hint": "reload_profile_cleaning_dashboard",
         }
@@ -524,6 +643,7 @@ TOOL_HANDLERS: dict[str, Callable[[UploadSessionMeta, dict[str, Any]], dict[str,
     "get_missing_and_fill_preview": tool_get_missing_and_fill_preview,
     "get_cleaning_impact": tool_get_cleaning_impact,
     "apply_safe_fills": tool_apply_safe_fills,
+    "restore_pre_safe_fill": tool_restore_pre_safe_fill,
 }
 
 
@@ -587,7 +707,7 @@ TOOL_DECLARATIONS: list[dict[str, Any]] = [
         "description": (
             "Apply only deterministic high-confidence fills (price/description with same-file evidence) "
             "after the user clearly requested applying fills. Never invents IDs, dates, invoices, or quantities. "
-            "Requires confirm_apply=true."
+            "Requires confirm_apply=true. Creates a session backup first; refuses to apply if backup fails."
         ),
         "parameters": {
             "type": "object",
@@ -595,6 +715,20 @@ TOOL_DECLARATIONS: list[dict[str, Any]] = [
                 "confirm_apply": {"type": "boolean"},
             },
             "required": ["confirm_apply"],
+        },
+    },
+    {
+        "name": "restore_pre_safe_fill",
+        "description": (
+            "Undo the last safe-fill apply by restoring the session-scoped pre-fill backup. "
+            "Requires confirm_restore=true. Only works for the active temporary upload session."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "confirm_restore": {"type": "boolean"},
+            },
+            "required": ["confirm_restore"],
         },
     },
 ]

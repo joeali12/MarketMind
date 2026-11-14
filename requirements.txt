@@ -1,7 +1,9 @@
 # MarketMind — versions verified in the project .venv (Python 3.12).
+# Source of truth for installs. pyproject.toml ranges must stay compatible.
 # Streamlit Community Cloud should use runtime.txt (python-3.12). These pins match
 # the committed joblib pipelines (scikit-learn 1.9.1, joblib 1.6.0).
 # Install: uv venv .venv --python 3.12 && source .venv/bin/activate && uv pip install -r requirements.txt
+# Optional browser smoke: uv pip install -r requirements-dev.txt && playwright install chromium
 
 pandas==3.1.1
 numpy==2.5.4
@@ -22,7 +24,5 @@ uvicorn==0.54.0
 python-multipart==0.0.20
 httpx==0.28.1
 pydantic==2.14.3
-playwright==1.64.1
 google-genai==3.0.0
 python-dotenv==1.2.4
-

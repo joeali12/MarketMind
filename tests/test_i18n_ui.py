@@ -77,6 +77,7 @@ def test_apptest_home_both_languages_and_nav():
     from streamlit.testing.v1 import AppTest
 
     at = AppTest.from_file("../app.py", default_timeout=60)
+    at.query_params["classic"] = "1"
     at.session_state[LANG_KEY] = "ar"
     at.run()
     assert not at.exception, at.exception

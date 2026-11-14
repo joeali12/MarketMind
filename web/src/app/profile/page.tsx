@@ -231,7 +231,7 @@ function ProfileInner() {
 
       {retrospective && retrospective.target_spend_90d_actual_gbp != null && (
         <section className="band">
-          <h2 className="display" style={{ marginTop: 0, fontSize: "1.2rem" }}>
+          <h2 className="section-title display">
             {t("retrospective_only")}
           </h2>
           <p className="muted" style={{ fontSize: 13 }}>
@@ -251,7 +251,7 @@ function ProfileInner() {
 
       {history.length > 0 && (
         <section className="band">
-          <h2 className="display" style={{ marginTop: 0, fontSize: "1.3rem" }}>
+          <h2 className="section-title display">
             {lang === "ar" ? "آخر مشتريات (عند حد التوقع)" : "Recent purchases (as of cutoff)"}
           </h2>
           <div className="table-wrap">

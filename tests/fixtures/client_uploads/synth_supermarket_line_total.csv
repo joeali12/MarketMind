@@ -1,0 +1,5 @@
+InvoiceNo,SaleDate,ProductName,Qty,LineTotal,CustomerID
+A1,15/01/2024,Tea,2,20.0,1
+A2,16/01/2024,Coffee,1,12.0,2
+A3,17/01/2024,Tea,4,40.0,1
+A4,18/01/2024,Sugar,3,9.0,3
