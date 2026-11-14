@@ -595,6 +595,40 @@ def _open_ended_analytics_turn(
     safe_history = _scrub_history(history)
     block = gemini_intents.user_text_blocks_provider(question)
     if block:
+        # Still honor safe transform commands locally (no Gemini / no raw rows out).
+        from api.services import data_transforms as _dx
+
+        if meta is not None and _dx.parse_transform_intent(
+            question, pending=getattr(meta, "pending_transform", None)
+        ):
+            grounded = gemini_tool_loop.grounded_tool_answer(
+                question=question, lang=lang, meta=meta
+            )
+            answer = grounded.get("answer") or ""
+            return {
+                "answer_en": answer,
+                "answer_ar": answer,
+                "mode": "grounded_facts",
+                "adapter_invoked": False,
+                "fallback_used": True,
+                "fallback_code": block,
+                "gemini_skip_reason": block,
+                "tools_called": grounded.get("tools_called") or [],
+                "data_mutated": bool(grounded.get("mutated")),
+                "quick_replies": [
+                    "طبّق" if ar else "apply",
+                    "قارن الشهر ده باللي قبله" if ar else "compare this month to last",
+                ],
+                "provider_label_en": status["label_en"],
+                "provider_label_ar": status["label_ar"],
+                "citations": [],
+                "actions": (
+                    [{"type": "refresh_after_mutation"}]
+                    if grounded.get("mutated")
+                    else []
+                ),
+                "raw_user_question_sent_externally": False,
+            }
         msg_en = (
             "I can’t send that question to AI assist because it looks like it may include "
             "identifiers or pasted rows. Rephrase without IDs/emails/phones, or ask about aggregates."
@@ -629,6 +663,41 @@ def _open_ended_analytics_turn(
         )
         grounded["raw_user_question_sent_externally"] = False
         return grounded
+
+    # Deterministic session transforms take priority over Gemini so clear
+    # commands (strip time, add invoice flag, …) never get refused/clarified away.
+    from api.services import data_transforms as _dx
+
+    if meta is not None and _dx.parse_transform_intent(
+        question, pending=getattr(meta, "pending_transform", None)
+    ):
+        grounded = gemini_tool_loop.grounded_tool_answer(
+            question=question, lang=lang, meta=meta
+        )
+        answer = grounded.get("answer") or ""
+        return {
+            "answer_en": answer,
+            "answer_ar": answer,
+            "mode": "grounded_facts",
+            "adapter_invoked": False,
+            "fallback_used": False,
+            "tools_called": grounded.get("tools_called") or [],
+            "data_mutated": bool(grounded.get("mutated")),
+            "quick_replies": [
+                "طبّق" if ar else "apply",
+                "شيل الساعة من التاريخ" if ar else "strip time from dates",
+                "ضيف عمود للفواتير > 1000" if ar else "flag invoices over 1000",
+            ],
+            "provider_label_en": "MarketMind (session transforms)",
+            "provider_label_ar": "مساعد MarketMind (تحويلات الجلسة)",
+            "citations": [],
+            "actions": (
+                [{"type": "refresh_after_mutation"}]
+                if grounded.get("mutated")
+                else []
+            ),
+            "raw_user_question_sent_externally": False,
+        }
 
     loop = gemini_tool_loop.run_tool_assisted_turn(
         question=question,

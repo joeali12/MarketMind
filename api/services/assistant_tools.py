@@ -633,6 +633,48 @@ def tool_restore_pre_safe_fill(meta: UploadSessionMeta, args: dict[str, Any]) ->
     )
 
 
+def tool_preview_data_transform(meta: UploadSessionMeta, args: dict[str, Any]) -> dict[str, Any]:
+    """Preview an allowlisted session-file transform (aggregates only)."""
+    from api.services import data_transforms
+
+    result = data_transforms.preview_or_apply(
+        meta,
+        op=str(args.get("op") or ""),
+        confirm_apply=False,
+        column=args.get("column"),
+        new_column=args.get("new_column"),
+        threshold=args.get("threshold"),
+        fill_value=args.get("fill_value"),
+        rename_to=args.get("rename_to"),
+    )
+    result["tool"] = "preview_data_transform"
+    return result
+
+
+def tool_apply_data_transform(meta: UploadSessionMeta, args: dict[str, Any]) -> dict[str, Any]:
+    """Apply an allowlisted transform after explicit confirmation."""
+    from api.services import data_transforms
+
+    if not bool(args.get("confirm_apply")):
+        return _err(
+            "confirm_required",
+            en="Set confirm_apply=true only after the user clearly asked to apply the transform.",
+            ar="ضع confirm_apply=true فقط بعد طلب صريح بتطبيق التحويل.",
+        )
+    result = data_transforms.preview_or_apply(
+        meta,
+        op=str(args.get("op") or ""),
+        confirm_apply=True,
+        column=args.get("column"),
+        new_column=args.get("new_column"),
+        threshold=args.get("threshold"),
+        fill_value=args.get("fill_value"),
+        rename_to=args.get("rename_to"),
+    )
+    result["tool"] = "apply_data_transform"
+    return result
+
+
 TOOL_HANDLERS: dict[str, Callable[[UploadSessionMeta, dict[str, Any]], dict[str, Any]]] = {
     "get_upload_profile": tool_get_upload_profile,
     "get_sales_kpis": tool_get_sales_kpis,
@@ -644,6 +686,8 @@ TOOL_HANDLERS: dict[str, Callable[[UploadSessionMeta, dict[str, Any]], dict[str,
     "get_cleaning_impact": tool_get_cleaning_impact,
     "apply_safe_fills": tool_apply_safe_fills,
     "restore_pre_safe_fill": tool_restore_pre_safe_fill,
+    "preview_data_transform": tool_preview_data_transform,
+    "apply_data_transform": tool_apply_data_transform,
 }
 
 
@@ -729,6 +773,55 @@ TOOL_DECLARATIONS: list[dict[str, Any]] = [
                 "confirm_restore": {"type": "boolean"},
             },
             "required": ["confirm_restore"],
+        },
+    },
+    {
+        "name": "preview_data_transform",
+        "description": (
+            "Preview a safe session-file transform without writing. Ops: strip_time "
+            "(remove time-of-day from a date column), add_invoice_flag (boolean column when "
+            "invoice total or row amount exceeds threshold), drop_column, rename_column, "
+            "cast_numeric, fill_constant. Returns aggregates only — never raw rows."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "op": {
+                    "type": "string",
+                    "description": (
+                        "strip_time | add_invoice_flag | drop_column | rename_column | "
+                        "cast_numeric | fill_constant"
+                    ),
+                },
+                "column": {"type": "string"},
+                "new_column": {"type": "string"},
+                "threshold": {"type": "number"},
+                "fill_value": {"type": "string"},
+                "rename_to": {"type": "string"},
+            },
+            "required": ["op"],
+        },
+    },
+    {
+        "name": "apply_data_transform",
+        "description": (
+            "Apply a previewed safe transform to the temporary upload session file. "
+            "Requires confirm_apply=true after the user clearly asked to apply "
+            "(e.g. strip time from dates, add true/false flag for invoices over a threshold). "
+            "Creates a session backup first. Never invents customer IDs or invoices."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "op": {"type": "string"},
+                "confirm_apply": {"type": "boolean"},
+                "column": {"type": "string"},
+                "new_column": {"type": "string"},
+                "threshold": {"type": "number"},
+                "fill_value": {"type": "string"},
+                "rename_to": {"type": "string"},
+            },
+            "required": ["op", "confirm_apply"],
         },
     },
 ]

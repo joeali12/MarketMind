@@ -29,6 +29,12 @@ OPEN_ASSISTANT_SYSTEM = """You are MarketMind, a senior retail data analyst for 
 Answer in the user's language (Egyptian-friendly Arabic if lang=ar, else concise English).
 
 You may call approved analytics tools to fetch server-computed facts for THIS upload only.
+You may also preview/apply allowlisted data transforms on the temporary upload session file:
+- strip_time: remove time-of-day from date/timestamp columns (keep calendar date)
+- add_invoice_flag: add a true/false column when invoice total (or row amount) exceeds a threshold
+- drop_column / rename_column / cast_numeric / fill_constant (with safety limits)
+Workflow: call preview_data_transform first; call apply_data_transform with confirm_apply=true
+only when the user clearly asked to apply/do it (e.g. شيل الساعة، ضيف عمود، apply, do it).
 Never invent numbers, product names, forecasts, or causes. Use only tool results for file-specific claims.
 If a request is ambiguous, ask one short clarifying question.
 If data is missing, say what is missing and suggest the next useful step.
@@ -336,6 +342,30 @@ def grounded_tool_answer(
             r.get("message_ar") if ar else r.get("message_en") or r.get("message_ar") or ""
         )
 
+    # Allowlisted session-file transforms (date strip, invoice flags, …)
+    from api.services import data_transforms as _dx
+
+    parsed = _dx.parse_transform_intent(
+        question, pending=getattr(meta, "pending_transform", None)
+    )
+    if parsed:
+        tool_name = (
+            "apply_data_transform" if parsed.get("confirm_apply") else "preview_data_transform"
+        )
+        args = {k: v for k, v in parsed.items() if k != "confirm_apply" and v is not None}
+        if parsed.get("confirm_apply"):
+            args["confirm_apply"] = True
+        r = use(tool_name, args)
+        parts.append(
+            (r.get("message_ar") if ar else r.get("message_en"))
+            or (r.get("preview_ar") if ar else r.get("preview_en"))
+            or ""
+        )
+        if r.get("ok") and r.get("needs_confirm") and ar:
+            parts.append("لو موافق، اكتب: طبّق")
+        elif r.get("ok") and r.get("needs_confirm"):
+            parts.append("If that looks right, reply: apply")
+
     if any(k in q for k in ("ناقص", "missing", "فراغ", "fill", "املأ", "املئ", "ملء")):
         if any(k in q for k in ("طبّق", "طبق", "apply", "نفّذ", "نفذ", "احفظ الملء")):
             r = use("apply_safe_fills", {"confirm_apply": True})
@@ -389,9 +419,25 @@ def grounded_tool_answer(
             parts.append(r.get("message_ar") if ar else r.get("message_en") or "")
 
     answer = "\n".join(p for p in parts if p).strip()
-    mutated = ("apply_safe_fills" in called or "restore_pre_safe_fill" in called) and (
+    mutated = (
+        "apply_safe_fills" in called
+        or "restore_pre_safe_fill" in called
+        or "apply_data_transform" in called
+    ) and (
         "Applied" in answer
+        or "Added" in answer
+        or "Stripped" in answer
+        or "Dropped" in answer
+        or "Renamed" in answer
+        or "Filled" in answer
+        or "Cast" in answer
         or "اتطبّق" in answer
+        or "اتضاف" in answer
+        or "اتشال" in answer
+        or "اتمسح" in answer
+        or "اتغيّر" in answer
+        or "اتملت" in answer
+        or "اتحوّل" in answer
         or "Restored" in answer
         or "اترجع" in answer
     )
