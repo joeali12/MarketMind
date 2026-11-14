@@ -58,7 +58,7 @@ def _chrome_executable() -> str | None:
 
 @pytest.fixture(scope="module")
 def egypt_top_by_units():
-    """Independent server-side ranking from the same fixture (not via the UI)."""
+    """Independent server-side ranking + overview sales from the same fixture."""
     if not FIXTURE.exists():
         pytest.skip(f"Egypt fixture missing: {FIXTURE}")
     sys.path.insert(0, str(ROOT))
@@ -88,10 +88,21 @@ def egypt_top_by_units():
         assert settings.status_code == 200
         meta = upload_analytics.get_meta_or_404(sid)
         leaders = upload_analytics.product_leaders(meta)
+        overview = client.get(f"/api/upload/{sid}/overview")
+        assert overview.status_code == 200, overview.text
+        ov = overview.json()
         client.delete(f"/api/upload/session?session_id={sid}")
     assert leaders.get("available") is True
     top = leaders["top_by_units"]
     assert top and top.get("product_name")
+    metrics = ov.get("metrics") or {}
+    sales = float(metrics.get("sales") or 0)
+    assert sales > 0
+    assert ov.get("demo") is False
+    assert (ov.get("currency_code") or "") == "EGP"
+    top = dict(top)
+    top["eligible_sales"] = sales
+    top["currency_code"] = "EGP"
     return top
 
 
@@ -192,6 +203,90 @@ def _assert_no_horizontal_overflow(page) -> None:
     )
 
 
+def _format_sales_like_ui(amount: float, *, lang: str = "ar") -> str:
+    """Match web/src/lib/api.ts formatMoney for EGP (maximumFractionDigits: 0)."""
+    locale = "ar-EG" if lang == "ar" else "en-GB"
+    # Playwright's Chromium uses ICU; Python's locale formatting differs, so
+    # derive the rounded integer the UI shows and accept either digit script.
+    rounded = int(round(amount))
+    return str(rounded)
+
+
+def _assert_sales_kpi_readable(page, expect, *, expected_sales: float) -> None:
+    sales_value = page.get_by_test_id("store-kpi-sales-value")
+    expect(sales_value).to_be_visible(timeout=30000)
+    text = sales_value.inner_text().strip()
+    assert text, "sales KPI value is empty"
+    assert any(ch.isdigit() or "\u0660" <= ch <= "\u0669" for ch in text), (
+        f"sales KPI has no digits: {text!r}"
+    )
+    rounded = _format_sales_like_ui(expected_sales)
+    # UI may use Western or Eastern Arabic digits; compare numeric parse of digits
+    western = (
+        text.replace(",", "")
+        .replace("٬", "")
+        .replace(".", "")
+        .replace("٫", "")
+    )
+    trans = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+    digits = "".join(ch for ch in western.translate(trans) if ch.isdigit())
+    assert digits, f"could not extract digits from sales KPI: {text!r}"
+    assert abs(int(digits) - int(rounded)) <= 1, (
+        f"sales KPI {text!r} (digits={digits}) != overview rounded {rounded}"
+    )
+
+    style = page.evaluate(
+        """() => {
+          const el = document.querySelector('[data-testid="store-kpi-sales-value"]');
+          const card = document.querySelector('[data-testid="store-kpi-sales"]');
+          if (!el || !card) return null;
+          const cs = getComputedStyle(el);
+          const bg = getComputedStyle(card);
+          const parse = (c) => {
+            const m = c.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/i);
+            return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+          };
+          const fg = parse(cs.color);
+          const back = parse(bg.backgroundColor) || parse(bg.backgroundImage ? '' : '');
+          // For gradients, sample the element's own rendered contrast via color != transparent
+          return {
+            color: cs.color,
+            backgroundColor: bg.backgroundColor,
+            backgroundImage: bg.backgroundImage,
+            fontSize: cs.fontSize,
+            opacity: cs.opacity,
+            visibility: cs.visibility,
+            fg,
+            text: (el.textContent || '').trim(),
+          };
+        }"""
+    )
+    assert style and style["text"], "sales KPI style probe failed"
+    assert style["visibility"] != "hidden"
+    assert float(style["opacity"] or 0) > 0.9
+    fg = style.get("fg")
+    assert fg, f"could not parse sales KPI color: {style.get('color')}"
+    # Require light-on-dark accent (white-ish) or dark-on-light — never near-white on white
+    luminance = (0.299 * fg[0] + 0.587 * fg[1] + 0.114 * fg[2]) / 255.0
+    has_gradient = bool(style.get("backgroundImage") and style["backgroundImage"] != "none")
+    bg = style.get("backgroundColor") or ""
+    # Accent card must keep the indigo gradient so white value text stays readable
+    assert has_gradient or "67" in bg or "99" in bg or "79" in bg, (
+        f"sales KPI card lost accent background; color={style.get('color')} bg={bg} "
+        f"image={style.get('backgroundImage')}"
+    )
+    if has_gradient:
+        assert luminance >= 0.85, (
+            f"accent sales value should be light for contrast, luminance={luminance:.2f} "
+            f"color={style.get('color')}"
+        )
+
+    # Card belongs to the EGP upload source
+    sales_card = page.get_by_test_id("store-kpi-sales")
+    expect(sales_card).to_be_visible()
+    expect(page.locator(".badge-upload")).to_contain_text("EGP")
+
+
 @pytest.mark.skipif(not FIXTURE.exists(), reason="Egypt CSV fixture missing")
 def test_egypt_upload_to_dashboard_browser_journey(journey_servers, egypt_top_by_units):
     from playwright.sync_api import expect, sync_playwright
@@ -201,14 +296,23 @@ def test_egypt_upload_to_dashboard_browser_journey(journey_servers, egypt_top_by
     product_name = str(egypt_top_by_units["product_name"])
     units = egypt_top_by_units["quantity"]
     units_str = _format_units_like_assistant(units)
+    expected_sales = float(egypt_top_by_units["eligible_sales"])
     assert product_name == "شاي أسود 250 جم"
     assert units_str == "245"
+    assert expected_sales > 200_000  # fixture overview sanity (not hard-coded display)
 
     exe = _chrome_executable()
+    if not exe:
+        pytest.skip(
+            "Playwright Chromium binary not found. "
+            "Install: pip install -r requirements-dev.txt && playwright install chromium"
+        )
     with sync_playwright() as p:
-        launch_kwargs: dict = {"headless": True, "args": ["--no-sandbox"]}
-        if exe:
-            launch_kwargs["executable_path"] = exe
+        launch_kwargs: dict = {
+            "headless": True,
+            "args": ["--no-sandbox"],
+            "executable_path": exe,
+        }
         browser = p.chromium.launch(**launch_kwargs)
         context = browser.new_context(viewport={"width": 1280, "height": 900})
         page = context.new_page()
@@ -218,15 +322,17 @@ def test_egypt_upload_to_dashboard_browser_journey(journey_servers, egypt_top_by
         html = page.locator("html")
         expect(html).to_have_attribute("dir", "rtl")
         assert page.locator("aside").count() == 0
-        expect(
-            page.get_by_role("heading", name="ارفع · اسأل · نظّف · حلّل")
-        ).to_be_visible()
+        expect(page.get_by_test_id("upload-hero-title")).to_be_visible()
+        expect(page.get_by_test_id("upload-hero-title")).to_contain_text(
+            "افهم زبائنك ومبيعاتك من غير تعقيد"
+        )
 
         # 3. Upload real fixture
         page.locator('input[type="file"]').set_input_files(str(FIXTURE))
 
         # 4. Wait for profile completion (progress ends; profile section appears)
-        expect(page.get_by_text("افهم الملف ده")).to_be_visible(timeout=120000)
+        expect(page.get_by_test_id("understand-file")).to_be_visible(timeout=120000)
+        expect(page.get_by_test_id("understand-file")).to_contain_text("افهم الملف ده")
         # Progress block unmounts only after proposals finish (stage 4 → clear)
         expect(page.locator(".upload-progress")).to_have_count(0, timeout=120000)
         expect(
@@ -303,6 +409,8 @@ def test_egypt_upload_to_dashboard_browser_journey(journey_servers, egypt_top_by
         kpis = page.locator(".kpi .value")
         expect(kpis.first).to_be_visible(timeout=30000)
         assert kpis.count() >= 3
+        # Eligible-sales KPI must show the upload overview amount with readable contrast
+        _assert_sales_kpi_readable(page, expect, expected_sales=expected_sales)
         # Forecast unavailable explanation (gate failure)
         expect(
             page.get_by_text("توقع خاص بالمتجر مش متاح").or_(
@@ -375,7 +483,7 @@ def test_egypt_upload_to_dashboard_browser_journey(journey_servers, egypt_top_by
         _close_assistant_if_open(page)
 
         # 11. English LTR
-        page.get_by_role("button", name="English").click()
+        page.get_by_role("button", name="EN", exact=True).click()
         expect(page.locator("html")).to_have_attribute("dir", "ltr", timeout=10000)
         en_nav = page.get_by_role("navigation", name="Navigation")
         expect(en_nav.get_by_role("link", name="Dashboard")).to_be_visible()
@@ -383,6 +491,10 @@ def test_egypt_upload_to_dashboard_browser_journey(journey_servers, egypt_top_by
         page.wait_for_url("**/store", timeout=30000)
         expect(page.locator(".badge-upload")).to_contain_text("EGP")
         expect(page.locator(".badge-upload")).to_contain_text("not demo data")
+        # Stitch static sample values must not appear on the live upload dashboard
+        main_en = page.locator("main").inner_text()
+        for sample in ("3,842,500", "14,820", "Downtown Cairo", "Cairo Main Branch"):
+            assert sample not in main_en, f"stitch sample leaked: {sample}"
 
         # 12. Reload must keep upload source (sessionStorage)
         page.reload(wait_until="networkidle", timeout=60000)
@@ -391,7 +503,7 @@ def test_egypt_upload_to_dashboard_browser_journey(journey_servers, egypt_top_by
         assert page.get_by_text("Sample UK retail dataset").count() == 0
 
         # 13. Mobile Arabic (~375px): dashboard, products, assistant
-        page.get_by_role("button", name="العربية").click()
+        page.get_by_role("button", name="عربي", exact=True).click()
         expect(page.locator("html")).to_have_attribute("dir", "rtl", timeout=10000)
         page.set_viewport_size({"width": 375, "height": 812})
 

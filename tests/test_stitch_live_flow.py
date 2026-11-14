@@ -11,7 +11,8 @@ from api.main import app
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "client_uploads"
-KAGGLE_SAMPLES = ROOT / "data" / "uploads" / "kaggle_samples"
+# Prefer committed fixtures; fall back to local data/uploads samples if present.
+KAGGLE_SAMPLES = FIXTURES
 STITCH = ROOT / "static" / "stitch"
 
 

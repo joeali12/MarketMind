@@ -1,0 +1,3 @@
+order_id,order_date,item,qty,unit_price,customer_id
+Z1,2023-11-01T10:00:00,Cable,1,20.0,9
+Z2,2023-11-02T11:30:00,Cable,2,20.0,9

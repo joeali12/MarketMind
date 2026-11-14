@@ -6,7 +6,8 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "MarketMind",
-  description: "Calm retail customer analytics — upload your file and talk through it",
+  description:
+    "Calm retail customer analytics — upload your file and talk through it",
   icons: { icon: "/icon.svg", shortcut: "/icon.svg" },
 };
 
@@ -15,12 +16,6 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="ar" dir="rtl" suppressHydrationWarning>
-      <head>
-        <link
-          href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;600&display=swap"
-          rel="stylesheet"
-        />
-      </head>
       <body className="chat-shell-body">
         <LangProvider>
           <DataSourceProvider>

@@ -6,40 +6,78 @@ MarketMind groups customers with RFM + K-Means and estimates eligible spend in t
 
 ## Product UI (primary)
 
-Local **Next.js + FastAPI** (top navigation, no sidebar). Demo data is **UK Online Retail II in GBP**. Boundaries and upload privacy: `docs/frontend_backend_split.md`.
+Local **Next.js** (`web/`) + **FastAPI** (`api/`). Top navigation, Arabic RTL / English LTR. Demo data is **UK Online Retail II in GBP**. Boundaries and upload privacy: `docs/frontend_backend_split.md`.
 
 ```bash
 source .venv/bin/activate
 uv pip install -r requirements.txt
+# Optional browser smoke / Playwright journeys:
+# uv pip install -r requirements-dev.txt && playwright install chromium
 PYTHONPATH=src:. uvicorn api.main:app --reload --port 8000
 # other terminal
 cd web && npm install && npm run dev
 ```
 
-Open http://127.0.0.1:3000 (or `npm run dev -- -p 3001` if busy).
+Demo API after a clean clone uses committed `data/processed/customer_*.parquet`,
+`transactions_demo_sample.parquet`, and `reports/demo_store_snapshot.json`.
+The full `transactions_cleaned.parquet` is optional (gitignored; rebuild via the cleaning pipeline).
 
-The PDF app is Streamlit: `streamlit run app.py` from the repo root. That file is the Community Cloud entrypoint.
+Open http://127.0.0.1:3000 (or `npm run dev -- -p 3001` if busy). Rewrites `/api/*` to the API.
 
-## Streamlit Community Cloud (PDF app)
+The academic app required by the project PDF is Streamlit: `streamlit run app.py` from the repo root. The Next.js UI above is the local product interface and is **not** the Community Cloud entrypoint.
 
-**Approved, not live.** Public deploy of the Streamlit app was approved on 2026-11-11 (D8). No `streamlit.app` URL exists yet.
+## Upload → analysis journey (product)
 
-1. Repository: `https://github.com/joeali12/MarketMind`
-2. Branch: `main`
-3. Main file path: `app.py`
-4. Python 3.12 (`runtime.txt`). Leave secrets empty. Do not add `.env`.
+1. Upload CSV or Excel on `/upload`.
+2. If the workbook has multiple sheets, pick the sales worksheet (not assumed silently).
+3. Confirm column mapping when headers are unknown or ambiguous (e.g. bare `Amount` / `Total`).
+4. Confirm currency when not present; confirm date format only when ambiguous.
+5. Review cleaning proposals and unresolved gaps (no invented IDs/dates/quantities).
+6. Open the **upload** store dashboard (`/store`) — never mixed with UK demo tables.
 
-See `docs/deployment.md`. Record a URL here only after that URL opens and its pages are checked.
+Session settings (mapping, sheet, currency, date format) live in the upload session and drive cleaning, analytics, exports, and the assistant.
+
+### POS / retail export compatibility (tested)
+
+**Not “any supermarket file.”** Proven against fixtures in `tests/fixtures/client_uploads/` (see that folder’s README + `matrix_manifest.json`):
+
+| Fixture | Layout | Money | Notes |
+|---------|--------|-------|-------|
+| Egypt CSV/XLSX sample | UCI-like EN + Category | qty × price | Isolation / product journey; not academic evidence |
+| `synth_pos_en_qty_price.csv` | `order_date`, `item`, `qty`, `unit_price` | qty × price → **69** | Browser EN + mobile |
+| `synth_supermarket_line_total.csv` | `LineTotal`, no unit price | line amount → **81** | No double-count |
+| `synth_arabic_headers.csv` | Arabic headers | qty × price | Alias path |
+| `synth_no_customer_id.csv` | No customer / invoice | qty × price → **41** | Customer KPIs N/A; browser AR RTL + mobile |
+| `synth_uci_no_category.csv` | UCI without Category | qty × price | Category charts off |
+| `synth_ambiguous_amount.csv` | Ambiguous `Amount` | needs map → **67.5** | Never auto unit_price |
+| `synth_iso_dates.csv` | ISO dates | qty × price | No forced dayfirst |
+| `synth_semicolon_bom.csv` | `;` + UTF-8 BOM | qty × price | Encoding/delimiter |
+| `synth_multisheet_sales.xlsx` | sheets Summary / SalesLines | qty × price → **170** | Must select SalesLines |
+
+Synthetic fixtures test **behavior only** — not model quality.
+
+**Manual mapping still required** for unrecognized headers and ambiguous Amount/Total. Missing customer ID, date, invoice, or category disables only dependent metrics (explained in UI). Multiple currencies are never summed or FX-converted; pick one analysis currency. Rows with a blank or unknown currency stay out of that total, and the screen shows how many were excluded and why.
+
+## Streamlit Community Cloud (academic app)
+
+**Not published.** No live URL has been created or tested. When you publish, use the existing GitHub repository and branch you actually push (this checkout tracks `main`).
+
+1. https://share.streamlit.io → New app → that GitHub repository.
+2. Branch: `main`.
+3. Main file path: `app.py`.
+4. Python comes from `runtime.txt` (`python-3.12`). Leave secrets empty. Do not add `.env`.
+
+The Cloud app reads committed artifacts and the small derived parquet files in `docs/deployment.md`. It does not need `data/raw/online_retail_II.xlsx`. Record a URL in this README only after that URL loads and the six pages are checked.
 
 ## Screenshot
 
-![MarketMind home (local demo)](docs/screenshots/home.png)
+![MarketMind home (local Next.js demo)](docs/screenshots/home.png)
 
-_Captured from the local Streamlit demo. Replace/update after UI changes._
+_Local product UI. Upload journey shots: `docs/screenshots/e2e/`._
 
 ## Data source
 
-Chen, D. (2012). Online Retail II [Dataset]. UCI Machine Learning Repository. https://doi.org/10.24432/C5CG6D
+Chen, D. (2012). Online Retail II [Dataset]. UCI Machine Learning Repository. https://doi.org/10.24432/C5CG6D  
 UCI page: https://archive.ics.uci.edu/dataset/502/online+retail+ii
 
 Raw data is **not** committed. Download locally:
@@ -63,7 +101,7 @@ export PYTHONPATH=src
 
 ## Assistant (Gemini 2.5 Flash)
 
-Optional explanations use Google’s `google-genai` SDK with **Gemini 2.5 Flash**. Classical ML artifacts remain the source of truth. **Raw user questions are never sent** — only fixed safe templates plus allowlisted aggregates.
+Optional explanations use Google’s `google-genai` SDK with **Gemini 2.5 Flash**. Classical ML artifacts remain the source of truth. **Raw user questions are never sent** — only fixed safe templates plus allowlisted aggregates / tool results (no raw row dumps).
 
 1. Create a key in [Google AI Studio](https://aistudio.google.com/apikey).
 2. Copy `.env.example` → `.env` and set `GEMINI_API_KEY` (never commit it).
@@ -79,7 +117,7 @@ pytest -q tests/test_gemini_provider.py tests/test_assistant_context.py tests/te
 python scripts/smoke_gemini.py
 ```
 
-## Pipeline
+## Pipeline (academic artifacts)
 
 ```bash
 python scripts/download_online_retail_ii.py
@@ -98,48 +136,51 @@ python scripts/run_eda.py
 python scripts/train_marketmind.py
 pytest -q
 # Product UI: uvicorn api.main:app + cd web && npm run dev
-# Legacy: streamlit run app.py
+# Academic UI (PDF / Community Cloud entrypoint): streamlit run app.py
 ```
 
 The app **loads saved artifacts only** and never silently retrains.
 
 ## Results (held-out chronological test)
 
-Source: `artifacts/model_metadata.json`.
+Source: `artifacts/model_metadata.json`. Academic UCI demo only — not upload-store forecasts.
 
 | Model | MAE | RMSE | R² | Split |
 |---|---:|---:|---:|---|
 | Mean baseline | 609.26 | 3290.69 | -0.006 | Test cutoff 2011-09-10; 90-day target |
 | Gradient boosting (selected) | 452.10 | 2650.95 | 0.347 | Same |
 
-Units: **eligible positive spend** over 90 days in **GBP (£)** (UCI dataset description; no FX conversion). Target excludes cancellation invoices starting with `C` and non-positive quantities — not net revenue after refunds (D5). Selection used training CV MAE only; test evaluated once. **R² is not an accuracy percentage.**
+Units: **eligible positive spend** over 90 days in **GBP (£)** (UCI dataset description; no FX conversion). Target excludes cancellation invoices matching the conservative `C####` / `C-…` rule and non-positive quantities — not net revenue after refunds (D5). Selection used training CV MAE only; test evaluated once. **R² is not an accuracy percentage.**
 
-**Cutoffs:** train 2010-12-11 · test 2011-09-10 · lookback = full history on/before cutoff.
-**Scale:** source 1,067,371 rows → cleaned 797,885 · train customers 4,316 · test 5,283.
+**Cutoffs:** train 2010-12-11 · test 2011-09-10 · lookback = full history on/before cutoff.  
+**Scale:** source 1,067,371 rows → cleaned 797,885 · train customers 4,316 · test 5,283.  
 **Segments:** K-Means **k=2** (train silhouette 0.425 vs k=3 at 0.329). Labels from profiles: *Recent high-spend* / *Lapsed low-spend*. Hierarchical ward silhouette ≈ 0.418 at k=2. k=3 retained as sensitivity only (`reports/k_sensitivity.json`).
 
-## App
+## App pages (product)
 
-- Framework: Streamlit (`app.py` + `app_pages/`)
-- Demo mode: Home → “Open demo customer lookup” uses precomputed customer tables
+- Next.js routes: Home, Upload, Store, Products, Groups, Profile, Project
+- Demo mode uses precomputed UK customer tables (GBP)
+- Upload mode uses the active session only
 - Marketing actions are **provisional heuristics** only (`actions_approved=false`) — not approved policy (D7)
 
 ## Limitations
 
-- Historical UK giftware data (2009–2011)
-- High zero-target rates in the 90-day window
+- Historical UK giftware data (2009–2011) for the academic demo model
+- Upload analytics are descriptive / capability-aware; store-specific 90-day forecast needs enough history
+- High zero-target rates in the academic 90-day window
 - Target is eligible positive spend (D5), not net revenue after refunds
-- Currency GBP (£) from UCI description; no FX conversion (D6)
-- Not a commercial multi-tenant SaaS. Streamlit Community Cloud is approved and not live yet (D8)
+- Currency GBP (£) for demo from UCI description; uploads never assume EGP/GBP/USD from filename
+- Not a commercial multi-tenant SaaS; Streamlit Cloud package is prepared, not published (D8)
 
 ## Docs
 
-- `docs/model_card.md` — model card
-- `docs/open_decisions_register.md` — TBD register
-- `docs/presentation_outline.md` — slide outline (unpublished)
-- `docs/linkedin_cv_draft.md` — drafts (do not post without approval)
-- `docs/deployment.md` — Cloud / HF Spaces prep without publishing
+- `docs/frontend_backend_split.md` — product API + privacy boundaries  
+- `docs/model_card.md` — model card  
+- `docs/open_decisions_register.md` — TBD register  
+- `docs/presentation_outline.md` — slide outline (unpublished)  
+- `docs/linkedin_cv_draft.md` — drafts (do not post without approval)  
+- `docs/deployment.md` — deploy prep without publishing  
 
 ## License
 
-Dataset terms follow UCI. Project code license TBD until confirmed by the author.
+Dataset terms follow UCI. Project code is MIT — see `LICENSE`.

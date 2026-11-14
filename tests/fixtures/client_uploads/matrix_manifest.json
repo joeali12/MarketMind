@@ -1,0 +1,142 @@
+{
+  "MarketMind_Egypt_Retail_Test.csv": {
+    "label": "egypt_uci_like",
+    "synthetic": false,
+    "currency": "EGP",
+    "date_format": "dayfirst",
+    "confirm_date": true,
+    "mapping": null,
+    "expect": {
+      "sales_totals": true,
+      "customer_groups": true
+    }
+  },
+  "MarketMind_Egypt_Retail_Test.xlsx": {
+    "label": "egypt_xlsx",
+    "synthetic": false,
+    "currency": "EGP",
+    "date_format": "dayfirst",
+    "confirm_date": true,
+    "mapping": null,
+    "expect": {
+      "sales_totals": true,
+      "customer_groups": true
+    }
+  },
+  "synth_pos_en_qty_price.csv": {
+    "label": "pos_en_qty_price",
+    "synthetic": true,
+    "currency": "USD",
+    "date_format": "iso",
+    "confirm_date": true,
+    "mapping": null,
+    "expect": {
+      "sales_totals": true,
+      "customer_groups": true,
+      "sales": 69.0
+    }
+  },
+  "synth_supermarket_line_total.csv": {
+    "label": "line_total_no_unit_price",
+    "synthetic": true,
+    "currency": "GBP",
+    "date_format": "dayfirst",
+    "confirm_date": true,
+    "mapping": null,
+    "expect": {
+      "sales_totals": true,
+      "sales": 81.0,
+      "no_double_count": true
+    }
+  },
+  "synth_arabic_headers.csv": {
+    "label": "arabic_headers",
+    "synthetic": true,
+    "currency": "SAR",
+    "date_format": "iso",
+    "confirm_date": true,
+    "mapping": null,
+    "expect": {
+      "sales_totals": true
+    }
+  },
+  "synth_no_customer_id.csv": {
+    "label": "no_customer_id",
+    "synthetic": true,
+    "currency": "EUR",
+    "date_format": "iso",
+    "confirm_date": true,
+    "mapping": null,
+    "expect": {
+      "sales_totals": true,
+      "customer_groups": false,
+      "sales": 41.0
+    }
+  },
+  "synth_uci_no_category.csv": {
+    "label": "uci_no_category",
+    "synthetic": true,
+    "currency": "GBP",
+    "date_format": "iso",
+    "confirm_date": true,
+    "mapping": null,
+    "expect": {
+      "sales_totals": true,
+      "category_analysis": false
+    }
+  },
+  "synth_ambiguous_amount.csv": {
+    "label": "ambiguous_amount",
+    "synthetic": true,
+    "currency": "USD",
+    "date_format": "iso",
+    "confirm_date": true,
+    "mapping": {
+      "invoice": "TxnID",
+      "invoice_date": "TxnDate",
+      "description": "Product",
+      "quantity": "Qty",
+      "unit_price": "Amount"
+    },
+    "expect": {
+      "needs_mapping": true,
+      "sales": 67.5
+    }
+  },
+  "synth_iso_dates.csv": {
+    "label": "iso_dates",
+    "synthetic": true,
+    "currency": "CAD",
+    "date_format": "iso",
+    "confirm_date": true,
+    "mapping": null,
+    "expect": {
+      "sales_totals": true,
+      "iso_no_forced_dayfirst": true
+    }
+  },
+  "synth_semicolon_bom.csv": {
+    "label": "semicolon_bom",
+    "synthetic": true,
+    "currency": "EUR",
+    "date_format": "dayfirst",
+    "confirm_date": true,
+    "mapping": null,
+    "expect": {
+      "sales_totals": true
+    }
+  },
+  "synth_multisheet_sales.xlsx": {
+    "label": "multisheet_excel",
+    "synthetic": true,
+    "currency": "USD",
+    "date_format": "iso",
+    "confirm_date": true,
+    "selected_sheet": "SalesLines",
+    "mapping": null,
+    "expect": {
+      "sales_totals": true,
+      "sales": 170.0
+    }
+  }
+}

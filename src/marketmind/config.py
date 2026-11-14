@@ -1,8 +1,8 @@
 """Central configuration for MarketMind.
 
-Date windows (lookback, cutoffs) that are TBD/data-dependent live here as
-explicit placeholders. Do not treat placeholder None/empty values as final
-business decisions.
+Resolved training cutoffs and cluster count match ``artifacts/model_metadata.json``.
+Scripts that need the authoritative trained values should still prefer metadata at
+runtime; these constants keep local imports from seeing unresolved placeholders.
 """
 
 from __future__ import annotations
@@ -34,7 +34,6 @@ RANDOM_SEED: int = 42
 # Confirmed against the downloaded workbook in Phase 2. Keys are canonical
 # internal names; values are source column names as found in the file.
 # ---------------------------------------------------------------------------
-# Placeholder until Phase 2 inspection writes the confirmed mapping.
 SOURCE_COLUMN_MAP: dict[str, str] = {
     "invoice": "Invoice",
     "stock_code": "StockCode",
@@ -52,12 +51,12 @@ REQUIRED_SOURCE_COLUMNS: tuple[str, ...] = tuple(SOURCE_COLUMN_MAP.values())
 EXPECTED_SHEETS: tuple[str, ...] = ("Year 2009-2010", "Year 2010-2011")
 
 # ---------------------------------------------------------------------------
-# Temporal design — TBD / data-dependent (D4)
-# Populate after date-coverage analysis. None means unresolved.
+# Temporal design — resolved (D4); mirrored in model_metadata.json
+# Full-history lookback; test cutoff = max_date - 90d; train cutoff earlier.
 # ---------------------------------------------------------------------------
-LOOKBACK_DAYS: int | None = None  # TBD D4
-TRAIN_CUTOFFS: list[str] = []  # ISO dates; TBD D4
-TEST_CUTOFF: str | None = None  # TBD D4
+LOOKBACK_DAYS: int | None = None  # full history on/before cutoff
+TRAIN_CUTOFFS: list[str] = ["2010-12-11"]
+TEST_CUTOFF: str = "2011-09-10"
 TARGET_WINDOW_DAYS: int = 90  # PDF-required
 
 # ---------------------------------------------------------------------------
@@ -66,8 +65,8 @@ TARGET_WINDOW_DAYS: int = 90  # PDF-required
 SEGMENTATION_FEATURE_COLS: tuple[str, ...] = ("recency", "frequency", "monetary")
 REGRESSION_FEATURE_COLS: tuple[str, ...] = ("recency", "frequency", "monetary")
 
-# Cluster count is TBD/data-dependent (chosen from training diagnostics).
-N_CLUSTERS: int | None = None
+# Chosen from training diagnostics / saved artifacts (k=2).
+N_CLUSTERS: int = 2
 
 # ---------------------------------------------------------------------------
 # Display / units — D6 resolved (user 2026-11-06)
@@ -79,7 +78,7 @@ CURRENCY_CONFIRMED: bool = True
 # Marketing actions remain provisional heuristics (D7); never flip without user approval.
 ACTIONS_APPROVED: bool = False
 
-# Preferred future deploy host (D1); public publish not approved (D8).
+# Preferred PDF deploy host (D1); public publish not approved until a live URL exists (D8).
 PREFERRED_DEPLOY_HOST: str = "streamlit_community_cloud"
 
 # ---------------------------------------------------------------------------

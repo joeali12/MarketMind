@@ -1,4 +1,8 @@
-"""MarketMind public entry. Streamlit Community Cloud runs this file, not the Next.js app."""
+"""MarketMind public entry. Streamlit Community Cloud runs this file, not the Next.js app.
+
+Default = classic academic multipage app (PDF idea 02: segments, CLV, recommended action).
+Optional Stitch shell: add ``?stitch=1`` (or ``?screen=welcome``) for the HTML product face.
+"""
 
 from __future__ import annotations
 
@@ -15,12 +19,20 @@ st.set_page_config(
     page_title="MarketMind",
     page_icon=":material/storefront:",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
-# Exact Stitch product face (copied from the approved export). Academic Streamlit
-# pages stay available with ?classic=1 for course checks.
-if st.query_params.get("classic") != "1":
+# Optional Stitch product face (not the PDF-required academic dashboard).
+_stitch = st.query_params.get("stitch") == "1" or (
+    st.query_params.get("screen")
+    in {
+        "welcome",
+        "file",
+        "cleaning",
+        "store",
+    }
+)
+if _stitch and st.query_params.get("classic") != "1":
     screens = {
         "welcome": "welcome_upload_pipeline.html",
         "file": "file_understanding_setup.html",
@@ -28,8 +40,6 @@ if st.query_params.get("classic") != "1":
         "store": "store_dashboard.html",
     }
     name = screens.get(st.query_params.get("screen", "welcome"), screens["welcome"])
-    # Same Stitch HTML as /stitch on the API. For live uploads against the API,
-    # open http://127.0.0.1:8000/ (or set MM_API_BASE). Streamlit serves the shell.
     href = f"/app/static/stitch/{name}"
     st.markdown(
         f"""

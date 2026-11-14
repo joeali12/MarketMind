@@ -172,7 +172,81 @@ def test_tool_result_privacy_guard():
         assert_tool_result_safe({"customer_id": "x"})
     with pytest.raises(ValueError):
         assert_tool_result_safe({"note": "email me at a@b.com"})
+    with pytest.raises(ValueError):
+        assert_tool_result_safe({"filename": "secret_customer_list.csv"})
     assert_tool_result_safe({"ok": True, "product_name": "Tea", "quantity": 10})
+
+
+@pytest.mark.skipif(not EGYPT.exists(), reason="Egypt fixture missing")
+def test_upload_profile_tool_omits_filename(client):
+    sid = _upload_ready(client, EGYPT)
+    from api.services import assistant_tools
+    from api.services.upload_store import load_meta
+
+    meta = load_meta(sid)
+    assert meta.filename
+    profile = assistant_tools.execute_tool("get_upload_profile", meta, {})
+    assert profile["ok"] is True
+    assert "filename" not in profile
+    assert "upload_filename" not in profile
+    client.delete(f"/api/upload/session?session_id={sid}")
+
+
+@pytest.mark.skipif(not EGYPT.exists(), reason="Egypt fixture missing")
+def test_safe_fill_apply_restore_and_session_isolation(client, tmp_path):
+    """Apply only when backup works; restore reverts; other sessions stay untouched."""
+    import hashlib
+
+    from api.services import assistant_tools, gap_fill
+    from api.services.upload_store import load_meta, upload_path
+
+    sid_a = _upload_ready(client, EGYPT)
+    sid_b = _upload_ready(client, EGYPT)
+    meta_a = load_meta(sid_a)
+    meta_b = load_meta(sid_b)
+    path_a = upload_path(sid_a)
+    path_b = upload_path(sid_b)
+    before_a = hashlib.sha256(path_a.read_bytes()).hexdigest()
+    before_b = hashlib.sha256(path_b.read_bytes()).hexdigest()
+
+    preview = assistant_tools.execute_tool("get_missing_and_fill_preview", meta_a, {})
+    assert preview.get("mutated") is False
+    assert preview.get("price_policy", {}).get("min_peers") == gap_fill.MIN_PRICE_PEERS
+
+    applied = assistant_tools.execute_tool(
+        "apply_safe_fills", meta_a, {"confirm_apply": True}
+    )
+    assert applied["ok"] is True
+    assert "quantity" not in set(applied.get("applied_fields") or [])
+    backup = gap_fill.pre_safe_fill_backup_path(path_a)
+    if applied.get("mutated"):
+        assert backup.exists()
+        assert hashlib.sha256(path_a.read_bytes()).hexdigest() != before_a
+        # Session B untouched
+        assert hashlib.sha256(path_b.read_bytes()).hexdigest() == before_b
+        restored = assistant_tools.execute_tool(
+            "restore_pre_safe_fill", meta_a, {"confirm_restore": True}
+        )
+        assert restored["ok"] is True
+        assert restored.get("restored") is True
+        assert hashlib.sha256(path_a.read_bytes()).hexdigest() == before_a
+        # B still untouched
+        assert hashlib.sha256(path_b.read_bytes()).hexdigest() == before_b
+    else:
+        # No-op is honest — nothing claimed as changed
+        assert applied.get("applied_count") == 0
+        assert hashlib.sha256(path_a.read_bytes()).hexdigest() == before_a
+
+    denied_restore = assistant_tools.execute_tool(
+        "restore_pre_safe_fill", meta_b, {"confirm_restore": False}
+    )
+    assert denied_restore["ok"] is False
+
+    status = client.get(f"/api/upload/{sid_a}/safe-fill-backup")
+    assert status.status_code == 200
+
+    client.delete(f"/api/upload/session?session_id={sid_a}")
+    client.delete(f"/api/upload/session?session_id={sid_b}")
 
 
 def test_tool_loop_bounds_constant():

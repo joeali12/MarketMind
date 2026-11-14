@@ -50,6 +50,16 @@ class UploadSessionMeta:
     profile_confirmed: bool = False
     # User preference after confirm: None | "manual" | "smart"
     gap_fill_preference: str | None = None
+    # POS mapping: canonical field → source column name (session-scoped).
+    column_mapping: dict | None = None
+    mapping_confirmed: bool = False
+    # Excel worksheet selection (required when workbook has multiple sheets).
+    selected_sheet: str | None = None
+    workbook_sheets: list | None = None
+    # When a currency column has multiple codes, user must pick one for totals.
+    analysis_currency_filter: str | None = None
+    # Cleaning proposal ids the user accepted for this session (dashboard/export).
+    accepted_cleaning_ids: list | None = None
 
 
 def _session_dir(session_id: str) -> Path:

@@ -1,0 +1,6 @@
+order_id,order_date,item,sku,qty,unit_price,customer_id
+O1,2024-03-01,Milk 1L,M1,2,10.0,101
+O1,2024-03-01,Bread,B1,1,5.0,101
+O2,2024-03-02,Milk 1L,M1,1,10.0,102
+O3,2024-03-05,Soap,S1,3,8.0,103
+O3,2024-03-05,Bread,B1,2,5.0,103

@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import logging
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +48,16 @@ from marketmind.inference import predict_customer  # noqa: E402
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("marketmind.api")
 
-app = FastAPI(title="MarketMind API", version="0.1.0")
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    upload_store.ensure_tmp_root()
+    removed = upload_store.cleanup_expired()
+    logger.info("startup upload_cleanup removed=%s", removed)
+    yield
+
+
+app = FastAPI(title="MarketMind API", version="0.1.0", lifespan=_lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -80,13 +90,6 @@ def product_home() -> RedirectResponse:
 
 if STITCH_DIR.is_dir():
     app.mount("/stitch", StaticFiles(directory=str(STITCH_DIR), html=False), name="stitch")
-
-
-@app.on_event("startup")
-def _startup() -> None:
-    upload_store.ensure_tmp_root()
-    removed = upload_store.cleanup_expired()
-    logger.info("startup upload_cleanup removed=%s", removed)
 
 
 def _demo_envelope(**extra: Any) -> dict[str, Any]:
@@ -139,16 +142,37 @@ def meta() -> dict[str, Any]:
 @app.get("/api/overview")
 def overview() -> dict[str, Any]:
     eda = demo_data.eda_insights()
-    tx = demo_data.transactions_cleaned()
-    eligible = tx.loc[eligible_positive_spend_mask(tx)]
-    orders = int(eligible["invoice"].nunique())
-    customers = int(eligible["customer_id"].nunique())
-    sales = float(eligible["line_amount"].sum())
-    aov = float(sales / orders) if orders else 0.0
+    snap = demo_data.store_snapshot()
+    metrics = dict(snap.get("metrics") or {})
 
-    # Returning customers: >1 distinct invoice
-    inv_per = eligible.groupby("customer_id")["invoice"].nunique()
-    returning_share = float((inv_per > 1).mean()) if len(inv_per) else 0.0
+    if not metrics:
+        try:
+            tx = demo_data.transactions_cleaned()
+        except demo_data.DemoDataUnavailable as exc:
+            demo_data.raise_demo_unavailable(exc)
+        eligible = tx.loc[eligible_positive_spend_mask(tx)]
+        orders = int(eligible["invoice"].nunique())
+        customers = int(eligible["customer_id"].nunique())
+        sales = float(eligible["line_amount"].sum())
+        aov = float(sales / orders) if orders else 0.0
+        inv_per = eligible.groupby("customer_id")["invoice"].nunique()
+        returning_share = float((inv_per > 1).mean()) if len(inv_per) else 0.0
+        metrics = {
+            "sales_gbp": sales,
+            "orders": orders,
+            "customers": customers,
+            "average_order_value_gbp": aov,
+            "returning_customer_share": returning_share,
+            "date_min": eda.get("date_min") or str(eligible["invoice_date"].min()),
+            "date_max": eda.get("date_max") or str(eligible["invoice_date"].max()),
+            "eligible_rows": int(len(eligible)),
+        }
+    else:
+        # Keep EDA date bounds authoritative when present
+        if eda.get("date_min"):
+            metrics["date_min"] = eda["date_min"]
+        if eda.get("date_max"):
+            metrics["date_max"] = eda["date_max"]
 
     # Arabic claims are curated mirrors for the known demo insight IDs (not machine-translated invent).
     claim_ar_by_id = {
@@ -169,16 +193,7 @@ def overview() -> dict[str, Any]:
     ]
 
     return _demo_envelope(
-        metrics={
-            "sales_gbp": sales,
-            "orders": orders,
-            "customers": customers,
-            "average_order_value_gbp": aov,
-            "returning_customer_share": returning_share,
-            "date_min": eda.get("date_min") or str(eligible["invoice_date"].min()),
-            "date_max": eda.get("date_max") or str(eligible["invoice_date"].max()),
-            "eligible_rows": int(len(eligible)),
-        },
+        metrics=metrics,
         insights=insights,
         caveat_en=eda.get("caveat")
         or "Insights describe this historical UK sample in GBP, not your live shop.",
@@ -273,7 +288,10 @@ def customer_profile(customer_id: int) -> dict[str, Any]:
     row = match.iloc[0]
     md = demo_data.metadata()
     cutoff = pd.Timestamp(md.get("test_cutoff") or "2011-09-10")
-    tx = demo_data.eligible_tx()
+    try:
+        tx = demo_data.eligible_tx()
+    except demo_data.DemoDataUnavailable as exc:
+        demo_data.raise_demo_unavailable(exc)
     cust_tx = tx[tx["customer_id"] == float(customer_id)].sort_values("invoice_date")
     # Features / history available at prediction time: on or before cutoff
     hist_at_cutoff = cust_tx[cust_tx["invoice_date"] <= cutoff]
@@ -415,28 +433,81 @@ def predict(body: PredictBody) -> dict[str, Any]:
 
 @app.get("/api/products")
 def products(limit: int = 30) -> dict[str, Any]:
-    tx = demo_data.eligible_tx()
-    by_product = (
-        tx.groupby(["stock_code", "description"], dropna=False)
-        .agg(
-            quantity=("quantity", "sum"),
-            spend_gbp=("line_amount", "sum"),
-            orders=("invoice", "nunique"),
-        )
-        .reset_index()
-        .sort_values("spend_gbp", ascending=False)
-        .head(limit)
-    )
-    # Monthly trend (historical)
-    month = tx.copy()
-    month["month"] = month["invoice_date"].dt.to_period("M").astype(str)
-    trend = (
-        month.groupby("month")
-        .agg(spend_gbp=("line_amount", "sum"), orders=("invoice", "nunique"))
-        .reset_index()
-        .sort_values("month")
-        .tail(24)
-    )
+    snap = demo_data.store_snapshot()
+    product_rows: list[dict[str, Any]] = []
+    trend_rows: list[dict[str, Any]] = []
+
+    # Prefer committed full-store snapshot so clones match published demo numbers
+    # without requiring the full cleaned parquet.
+    if snap.get("products") and not demo_data.has_full_transactions():
+        for p in (snap.get("products") or [])[:limit]:
+            product_rows.append(
+                {
+                    "stock_code": str(p.get("stock_code")),
+                    "description": p.get("description"),
+                    "quantity": float(p.get("quantity") or 0),
+                    "spend_gbp": float(p.get("spend_gbp") or 0),
+                    "orders": int(p.get("orders") or 0),
+                    "note_en": "Historical sales only — not a prediction of future need",
+                }
+            )
+        trend_rows = list(snap.get("monthly_trend") or [])[-24:]
+    else:
+        try:
+            tx = demo_data.eligible_tx()
+        except demo_data.DemoDataUnavailable as exc:
+            if snap.get("products"):
+                for p in (snap.get("products") or [])[:limit]:
+                    product_rows.append(
+                        {
+                            "stock_code": str(p.get("stock_code")),
+                            "description": p.get("description"),
+                            "quantity": float(p.get("quantity") or 0),
+                            "spend_gbp": float(p.get("spend_gbp") or 0),
+                            "orders": int(p.get("orders") or 0),
+                            "note_en": "Historical sales only — not a prediction of future need",
+                        }
+                    )
+                trend_rows = list(snap.get("monthly_trend") or [])[-24:]
+            else:
+                demo_data.raise_demo_unavailable(exc)
+        else:
+            by_product = (
+                tx.groupby(["stock_code", "description"], dropna=False)
+                .agg(
+                    quantity=("quantity", "sum"),
+                    spend_gbp=("line_amount", "sum"),
+                    orders=("invoice", "nunique"),
+                )
+                .reset_index()
+                .sort_values("spend_gbp", ascending=False)
+                .head(limit)
+            )
+            month = tx.copy()
+            month["month"] = month["invoice_date"].dt.to_period("M").astype(str)
+            trend = (
+                month.groupby("month")
+                .agg(spend_gbp=("line_amount", "sum"), orders=("invoice", "nunique"))
+                .reset_index()
+                .sort_values("month")
+                .tail(24)
+            )
+            product_rows = [
+                {
+                    "stock_code": str(r.stock_code),
+                    "description": None if pd.isna(r.description) else str(r.description),
+                    "quantity": float(r.quantity),
+                    "spend_gbp": float(r.spend_gbp),
+                    "orders": int(r.orders),
+                    "note_en": "Historical sales only — not a prediction of future need",
+                }
+                for r in by_product.itertuples()
+            ]
+            trend_rows = [
+                {"month": r.month, "spend_gbp": float(r.spend_gbp), "orders": int(r.orders)}
+                for r in trend.itertuples()
+            ]
+
     return _demo_envelope(
         category_available=False,
         category_omitted_reason_en=(
@@ -447,21 +518,8 @@ def products(limit: int = 30) -> dict[str, Any]:
             "بيانات العرض التجريبية مفيهاش عمود تصنيف للمنتجات. "
             "رسوم التصنيف بتظهر بس لو الملف المرفوع فيه عمود تصنيف مربوط."
         ),
-        products=[
-            {
-                "stock_code": str(r.stock_code),
-                "description": None if pd.isna(r.description) else str(r.description),
-                "quantity": float(r.quantity),
-                "spend_gbp": float(r.spend_gbp),
-                "orders": int(r.orders),
-                "note_en": "Historical sales only — not a prediction of future need",
-            }
-            for r in by_product.itertuples()
-        ],
-        monthly_trend=[
-            {"month": r.month, "spend_gbp": float(r.spend_gbp), "orders": int(r.orders)}
-            for r in trend.itertuples()
-        ],
+        products=product_rows,
+        monthly_trend=trend_rows,
         categories=[],
     )
 
@@ -1034,13 +1092,17 @@ def upload_restore_safe_fill(body: RestoreSafeFillBody) -> dict[str, Any]:
             detail=result.get("message_en") or result.get("error_code") or "restore_failed",
         )
     path = upload_store.upload_path(body.session_id)
+    restored_df = clean_svc.read_upload_dataframe(path, nrows=None)
     refreshed = clean_svc.build_proposals(
-        clean_svc.read_upload_dataframe(path, nrows=None),
+        restored_df,
         date_format=meta.date_format,
         currency_code=meta.currency_code,
         category_column=meta.category_column if meta.has_category_mapped else None,
+        column_mapping=meta.column_mapping,
     )
-    profile = upload_profile.build_profile(meta)
+    profile = upload_profile.build_profile(
+        restored_df, meta, date_format=meta.date_format
+    )
     return {
         "session_id": body.session_id,
         "restored": True,
@@ -1072,6 +1134,7 @@ def upload_gap_fill(body: GapFillBody) -> dict[str, Any]:
         date_format=meta.date_format,
         currency_code=meta.currency_code,
         category_column=meta.category_column if meta.has_category_mapped else None,
+        column_mapping=meta.column_mapping,
     )
     patches: list[dict[str, Any]] = [p.model_dump() for p in body.patches]
 
@@ -1096,7 +1159,9 @@ def upload_gap_fill(body: GapFillBody) -> dict[str, Any]:
     if not patches:
         raise HTTPException(status_code=400, detail="No patches to apply")
 
-    updated, applied = gap_fill_svc.apply_patches_to_source(raw, patches)
+    updated, applied = gap_fill_svc.apply_patches_to_source(
+        raw, patches, column_mapping=meta.column_mapping
+    )
     gap_fill_svc.write_source_dataframe(path, updated)
     meta.byte_size = path.stat().st_size
     upload_store.save_meta(meta)
@@ -1106,6 +1171,7 @@ def upload_gap_fill(body: GapFillBody) -> dict[str, Any]:
         date_format=meta.date_format,
         currency_code=meta.currency_code,
         category_column=meta.category_column if meta.has_category_mapped else None,
+        column_mapping=meta.column_mapping,
     )
     upload_store.safe_log_outcome(
         body.session_id,
@@ -1128,10 +1194,41 @@ def upload_gap_fill(body: GapFillBody) -> dict[str, Any]:
 class ApplyBody(BaseModel):
     session_id: str
     accepted_ids: list[str] = Field(default_factory=list)
+    keep_session: bool = False
+    discard_session: bool = True
+
+
+@app.post("/api/upload/accept-cleaning")
+def upload_accept_cleaning(body: ApplyBody) -> dict[str, Any]:
+    """Persist accepted cleaning proposal ids without discarding the session."""
+    try:
+        meta = upload_store.load_meta(body.session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    meta.accepted_cleaning_ids = list(body.accepted_ids)
+    upload_store.save_meta(meta)
+    upload_store.safe_log_outcome(
+        body.session_id,
+        outcome="accept_cleaning",
+        row_count=meta.row_count,
+        extra={"accepted": body.accepted_ids},
+    )
+    return {
+        "session_id": body.session_id,
+        "accepted_cleaning_ids": meta.accepted_cleaning_ids,
+        "saved": True,
+        "note_en": "Accepted cleaning choices saved for this upload session.",
+        "note_ar": "اختيارات التنظيف المقبولة اتحفظت لجلسة الرفع دي.",
+    }
 
 
 @app.post("/api/upload/apply")
 def upload_apply(body: ApplyBody) -> Response:
+    """Apply accepted cleaning ops and return a cleaned CSV export.
+
+    By default the session is discarded after export (download-and-done).
+    Pass keep_session=true (or discard_session=false) to keep analyzing.
+    """
     try:
         path = upload_store.upload_path(body.session_id)
         meta = upload_store.load_meta(body.session_id)
@@ -1153,6 +1250,8 @@ def upload_apply(body: ApplyBody) -> Response:
     out_df.to_csv(buf, index=False)
     data = buf.getvalue().encode("utf-8")
     upload_store.write_export(body.session_id, data, "cleaned.csv")
+    meta.accepted_cleaning_ids = list(body.accepted_ids)
+    upload_store.save_meta(meta)
     upload_store.safe_log_outcome(
         body.session_id,
         outcome="applied_export",
@@ -1160,7 +1259,9 @@ def upload_apply(body: ApplyBody) -> Response:
         extra={"accepted": body.accepted_ids, "currency": meta.currency_code},
     )
     currency = meta.currency_code or "UNSPECIFIED"
-    upload_store.discard_session(body.session_id)
+    keep = bool(body.keep_session) or (not body.discard_session)
+    if not keep:
+        upload_store.discard_session(body.session_id)
 
     return Response(
         content=data,
@@ -1171,6 +1272,7 @@ def upload_apply(body: ApplyBody) -> Response:
             "X-Rows-After": str(applied["rows_after"]),
             "X-Eligible-Spend": str(applied["eligible_spend_after"]),
             "X-Currency-Code": currency,
+            "X-Session-Kept": "1" if keep else "0",
         },
     )
 

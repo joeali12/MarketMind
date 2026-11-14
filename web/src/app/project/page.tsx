@@ -31,7 +31,7 @@ export default function ProjectPage() {
       {data && (
         <>
           <section className="band">
-            <h2 className="display" style={{ marginTop: 0, fontSize: "1.25rem" }}>
+            <h2 className="section-title display">
               {lang === "ar" ? "تعريفات" : "Definitions"}
             </h2>
             <ul className="muted">
@@ -46,7 +46,7 @@ export default function ProjectPage() {
           </section>
 
           <section className="band">
-            <h2 className="display" style={{ marginTop: 0, fontSize: "1.25rem" }}>
+            <h2 className="section-title display">
               {lang === "ar" ? "جودة التوقع (تجريبي)" : "Prediction quality (demo)"}
             </h2>
             <p className="muted">
@@ -76,7 +76,7 @@ export default function ProjectPage() {
           </section>
 
           <section className="band">
-            <h2 className="display" style={{ marginTop: 0, fontSize: "1.25rem" }}>
+            <h2 className="section-title display">
               {lang === "ar" ? "سجل تنظيف العرض" : "Demo cleaning history"}
             </h2>
             <div className="table-wrap">

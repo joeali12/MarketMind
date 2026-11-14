@@ -6,120 +6,40 @@ from typing import Any
 
 import pandas as pd
 
+from api.services import canonical_upload
 from api.services import cleaning_proposals as clean_svc
+from api.services import column_mapping as cmap
 from api.services.upload_store import UploadSessionMeta, currency_label
-from marketmind.config import REQUIRED_SOURCE_COLUMNS, SOURCE_COLUMN_MAP
-from marketmind.data.cleaning import eligible_positive_spend_mask, is_cancellation_invoice
-
-# Explicit POS header aliases → canonical (confidence 1.0 exact / 0.85 alias)
-_ALIAS_MAP: dict[str, tuple[str, float]] = {
-    "invoice": ("invoice", 1.0),
-    "invoiceno": ("invoice", 0.85),
-    "invoice_no": ("invoice", 0.85),
-    "invoice number": ("invoice", 0.85),
-    "bill no": ("invoice", 0.8),
-    "stockcode": ("stock_code", 1.0),
-    "stock code": ("stock_code", 1.0),
-    "sku": ("stock_code", 0.85),
-    "item code": ("stock_code", 0.85),
-    "product code": ("stock_code", 0.8),
-    "description": ("description", 1.0),
-    "item name": ("description", 0.85),
-    "product name": ("description", 0.85),
-    "quantity": ("quantity", 1.0),
-    "qty": ("quantity", 0.9),
-    "invoicedate": ("invoice_date", 1.0),
-    "invoice date": ("invoice_date", 1.0),
-    "date": ("invoice_date", 0.7),  # low — require confirmation
-    "price": ("unit_price", 1.0),
-    "unitprice": ("unit_price", 1.0),
-    "unit price": ("unit_price", 1.0),
-    "amount": ("unit_price", 0.65),  # low
-    "customer id": ("customer_id", 1.0),
-    "customerid": ("customer_id", 1.0),
-    "customer": ("customer_id", 0.7),
-    "country": ("country", 1.0),
-    "category": ("category", 1.0),
-    "product category": ("category", 0.9),
-    "cat": ("category", 0.75),
-}
-
-_LOW_CONFIDENCE = 0.75
+from marketmind.data.cleaning import eligible_positive_spend_mask
 
 
 def suggest_column_mappings(columns: list[str]) -> dict[str, Any]:
-    """Map source headers to canonical fields with confidence scores."""
-    mappings = []
-    used_targets: set[str] = set()
-    for col in columns:
-        key = str(col).strip().lower().replace("_", " ")
-        key_compact = key.replace(" ", "")
-        hit = _ALIAS_MAP.get(key) or _ALIAS_MAP.get(key_compact)
-        # Also try SOURCE_COLUMN_MAP reverse (display names)
-        if not hit:
-            for canon, src in SOURCE_COLUMN_MAP.items():
-                if src.lower().replace("_", " ") == key or src.lower().replace(" ", "") == key_compact:
-                    hit = (canon, 1.0)
-                    break
-        if not hit:
-            mappings.append(
-                {
-                    "source_column": col,
-                    "target": None,
-                    "confidence": 0.0,
-                    "auto_apply": False,
-                    "needs_user_confirm": False,
-                    "note_en": "Unmapped extra column",
-                }
-            )
-            continue
-        target, conf = hit
-        auto = conf >= _LOW_CONFIDENCE and target not in used_targets
-        if auto and target != "category":
-            used_targets.add(target)
-        mappings.append(
-            {
-                "source_column": col,
-                "target": target,
-                "confidence": conf,
-                "auto_apply": auto and conf >= _LOW_CONFIDENCE,
-                "needs_user_confirm": conf < _LOW_CONFIDENCE,
-                "note_en": (
-                    "Low confidence — confirm before using"
-                    if conf < _LOW_CONFIDENCE
-                    else "Recognized header"
-                ),
-            }
-        )
-    return {
-        "mappings": mappings,
-        "required_targets": list(REQUIRED_SOURCE_COLUMNS),
-        "low_confidence_threshold": _LOW_CONFIDENCE,
-        "note_en": "Low-confidence mappings are never applied silently.",
-        "note_ar": "الربط ضعيف الثقة مش بيتطبّق لوحده من غير تأكيدك.",
-    }
+    """Delegate to the shared POS mapping scorer."""
+    return cmap.suggest_mappings(columns)
 
 
 def classify_dataset(df: pd.DataFrame, validation: dict[str, Any]) -> dict[str, Any]:
     """Phrase classification as 'appears to be…' with supporting columns."""
     cols = [str(c) for c in df.columns]
-    has_invoice = any("invoice" in c.lower() for c in cols)
-    has_qty = any(c.lower() in {"quantity", "qty"} for c in cols)
-    has_price = any("price" in c.lower() or c.lower() == "amount" for c in cols)
-    has_date = any("date" in c.lower() for c in cols)
-    has_customer = any("customer" in c.lower() for c in cols)
-    has_product = any(
-        x in "".join(cols).lower() for x in ("stock", "sku", "description", "product")
-    )
+    mapping = (validation.get("column_mapping") or {}).get("effective_mapping") or {}
+    if not mapping:
+        sug = cmap.suggest_mappings(cols)
+        mapping = sug.get("auto_mapping") or {}
+    has_invoice = "invoice" in mapping
+    has_qty = "quantity" in mapping
+    has_price = "unit_price" in mapping or "line_amount" in mapping
+    has_date = "invoice_date" in mapping
+    has_customer = "customer_id" in mapping
+    has_product = "stock_code" in mapping or "description" in mapping
     score = sum([has_invoice, has_qty, has_price, has_date, has_customer, has_product])
     confidence = round(score / 6.0, 2)
     evidence = []
     if has_invoice:
-        evidence.append("invoice-like column")
+        evidence.append("invoice/order column")
     if has_qty:
         evidence.append("quantity column")
     if has_price:
-        evidence.append("price/amount column")
+        evidence.append("price or line-amount column")
     if has_date:
         evidence.append("date column")
     if has_customer:
@@ -127,10 +47,11 @@ def classify_dataset(df: pd.DataFrame, validation: dict[str, Any]) -> dict[str, 
     if has_product:
         evidence.append("product/stock/description column")
 
-    if validation.get("ok") and confidence >= 0.67:
+    caps = cmap.assess_capabilities(mapping)
+    if caps.get("analysis_ready_minimum") and confidence >= 0.5:
         label_en = "Appears to be retail line-item transactions (POS-style)"
         label_ar = "يبدو إنه معاملات بيع بالسطر (نمط نقاط البيع)"
-    elif confidence >= 0.5:
+    elif confidence >= 0.4:
         label_en = "Appears related to retail transactions, but some expected fields are unclear"
         label_ar = "يبدو مرتبط بمعاملات بيع، بس بعض الحقول المتوقعة مش واضحة"
     else:
@@ -153,36 +74,83 @@ def build_profile(
     *,
     date_format: str | None = None,
 ) -> dict[str, Any]:
-    validation = clean_svc.validate_upload_frame(df)
-    mappings = suggest_column_mappings([str(c) for c in df.columns])
-    classification = classify_dataset(df, validation)
+    validation = canonical_upload.validate_for_upload(meta)
+    # Re-read may differ from passed df if sheet selection changed — prefer session raw
+    try:
+        raw = canonical_upload.read_raw_source(meta, nrows=min(len(df) if len(df) else 5000, 5000))
+    except Exception:  # noqa: BLE001
+        raw = df
+    columns = [str(c) for c in raw.columns]
+    resolved = validation.get("column_mapping") or canonical_upload.resolve_mapping(meta, columns)
+    mappings = resolved.get("suggestions") or cmap.suggest_mappings(columns)
+    classification = classify_dataset(raw, validation)
 
-    preview = df.head(8).where(pd.notna(df.head(8)), None)
-    # Safe preview: truncate long strings; never log
+    preview = raw.head(8).where(pd.notna(raw.head(8)), None)
     preview_rows = []
     for _, row in preview.iterrows():
         preview_rows.append(
-            {str(k): (None if pd.isna(v) else (str(v)[:80] if not isinstance(v, (int, float)) else v)) for k, v in row.items()}
+            {
+                str(k): (
+                    None
+                    if pd.isna(v)
+                    else (str(v)[:80] if not isinstance(v, (int, float)) else v)
+                )
+                for k, v in row.items()
+            }
         )
 
     findings: list[dict[str, Any]] = []
-    if not validation["ok"]:
+    if validation.get("needs_sheet_selection"):
         return {
             "ok": False,
             "validation": validation,
             "column_mappings": mappings,
             "classification": classification,
-            "row_count": int(len(df)),
-            "column_count": int(df.shape[1]),
+            "row_count": int(meta.row_count or 0),
+            "column_count": 0,
+            "preview_rows": [],
+            "findings": [
+                {
+                    "id": "needs_sheet_selection",
+                    "severity": "error",
+                    "title_en": "Choose an Excel worksheet",
+                    "title_ar": "اختار ورقة إكسل",
+                    "count": len(validation.get("sheets") or []),
+                    "detail_en": "This workbook has multiple sheets — select the sales sheet.",
+                }
+            ],
+            "workbook": {
+                "sheets": validation.get("sheets") or [],
+                "selected_sheet": meta.selected_sheet,
+                "needs_sheet_selection": True,
+            },
+            "currency": {
+                "code": meta.currency_code,
+                "label": currency_label(meta),
+                "selected": bool(meta.currency_code and meta.currency_code != "UNSPECIFIED"),
+            },
+            "mapping": resolved,
+            "capabilities": cmap.capability_docs(),
+        }
+
+    if not resolved.get("capabilities", {}).get("analysis_ready_minimum"):
+        return {
+            "ok": False,
+            "validation": validation,
+            "column_mappings": mappings,
+            "classification": classification,
+            "row_count": int(len(raw)),
+            "column_count": int(raw.shape[1]),
             "preview_rows": preview_rows,
             "findings": [
                 {
-                    "id": "missing_required_columns",
+                    "id": "mapping_incomplete",
                     "severity": "error",
-                    "title_en": "Required columns missing",
-                    "title_ar": "أعمدة مطلوبة ناقصة",
-                    "count": len(validation.get("missing_columns") or []),
-                    "detail_en": validation.get("message"),
+                    "title_en": "Map product and monetary columns",
+                    "title_ar": "اربط أعمدة المنتج والمبلغ",
+                    "count": len((resolved.get("capabilities") or {}).get("blockers") or []),
+                    "detail_en": (resolved.get("capabilities") or {}).get("message_en"),
+                    "detail_ar": (resolved.get("capabilities") or {}).get("message_ar"),
                 }
             ],
             "currency": {
@@ -192,40 +160,70 @@ def build_profile(
             },
             "date_format": validation.get("date_format"),
             "date_format_confirmed": meta.date_format_confirmed,
+            "mapping": resolved,
+            "needs_user_mapping": True,
+            "workbook": {
+                "sheets": meta.workbook_sheets or [],
+                "selected_sheet": meta.selected_sheet,
+                "needs_sheet_selection": False,
+            },
+            "capabilities": cmap.capability_docs(),
+            "source": "upload",
+            "demo": False,
+            "session_id": meta.session_id,
+            "filename": meta.filename,
         }
 
-    rename = {src: canon for canon, src in SOURCE_COLUMN_MAP.items()}
-    working = df.rename(columns=rename)[list(SOURCE_COLUMN_MAP.keys())].copy()
-    parsed = clean_svc.parse_upload_types(working, date_format=date_format or meta.date_format)
-    if meta.has_category_mapped and meta.category_column and meta.category_column in df.columns:
-        parsed["category"] = df[meta.category_column].astype("string").values
+    # Build typed frame when mapping is usable (even if user still confirming ambiguous extras)
+    try:
+        parsed = canonical_upload.load_canonical_frame(
+            meta, nrows=min(len(raw), 100_000), require_mapping=False
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "validation": validation,
+            "column_mappings": mappings,
+            "classification": classification,
+            "row_count": int(len(raw)),
+            "column_count": int(raw.shape[1]),
+            "preview_rows": preview_rows,
+            "findings": [
+                {
+                    "id": "canonical_load_failed",
+                    "severity": "error",
+                    "title_en": "Could not build analysis view",
+                    "title_ar": "مقدرناش نبني عرض التحليل",
+                    "count": 1,
+                    "detail_en": str(exc),
+                }
+            ],
+            "mapping": resolved,
+            "needs_user_mapping": bool(resolved.get("needs_user_mapping")),
+            "source": "upload",
+            "demo": False,
+            "session_id": meta.session_id,
+            "filename": meta.filename,
+        }
 
-    eligible = parsed.loc[eligible_positive_spend_mask(parsed)]
+    try:
+        eligible = parsed.loc[eligible_positive_spend_mask(parsed)]
+    except Exception:  # noqa: BLE001
+        eligible = parsed.loc[canonical_upload.eligible_for_upload(parsed)]
     cancel = parsed["is_cancellation"]
     bad_dates = parsed["invoice_date"].isna()
-    missing_price = parsed["unit_price"].isna()
+    missing_price = parsed["unit_price"].isna() & parsed["line_amount"].isna()
     missing_cid = parsed["customer_id"].isna()
     missing_desc = parsed["description"].isna()
-    dups = parsed.duplicated(
-        subset=[
-            "invoice",
-            "stock_code",
-            "description",
-            "quantity",
-            "invoice_date",
-            "unit_price",
-            "customer_id",
-            "country",
-        ]
-    )
 
     def _examples(mask: pd.Series, cols: list[str], n: int = 3) -> list[dict[str, Any]]:
         rows = []
-        for _, r in parsed.loc[mask, cols].head(n).iterrows():
-            rows.append({c: (None if pd.isna(r[c]) else str(r[c])[:60]) for c in cols})
+        use_cols = [c for c in cols if c in parsed.columns]
+        for _, r in parsed.loc[mask, use_cols].head(n).iterrows():
+            rows.append({c: (None if pd.isna(r[c]) else str(r[c])[:60]) for c in use_cols})
         return rows
 
-    if int(bad_dates.sum()):
+    if int(bad_dates.sum()) and "invoice_date" in (meta.column_mapping or resolved.get("effective_mapping") or {}):
         findings.append(
             {
                 "id": "invalid_dates",
@@ -242,33 +240,33 @@ def build_profile(
             {
                 "id": "missing_price",
                 "severity": "error",
-                "title_en": "Missing unit price",
-                "title_ar": "سعر الوحدة ناقص",
+                "title_en": "Missing monetary values",
+                "title_ar": "قيم مالية ناقصة",
                 "count": int(missing_price.sum()),
-                "examples": _examples(missing_price, ["invoice", "stock_code", "unit_price"]),
+                "examples": _examples(missing_price, ["invoice", "stock_code", "unit_price", "line_amount"]),
             }
         )
-    if int(missing_cid.sum()):
+    if int(missing_cid.sum()) == len(parsed):
+        findings.append(
+            {
+                "id": "no_customer_id_column",
+                "severity": "info",
+                "title_en": "No customer ID — store/product analytics still available",
+                "title_ar": "مفيش رقم زبون — تحليل المتجر/المنتجات لسه متاح",
+                "count": int(len(parsed)),
+                "detail_en": "Customer groups and returning rates stay disabled until a customer ID is mapped.",
+            }
+        )
+    elif int(missing_cid.sum()):
         findings.append(
             {
                 "id": "missing_customer_id",
                 "severity": "warning",
-                "title_en": "Missing customer ID",
-                "title_ar": "رقم زبون ناقص",
+                "title_en": "Missing customer ID on some rows",
+                "title_ar": "رقم زبون ناقص في بعض الصفوف",
                 "count": int(missing_cid.sum()),
                 "examples": _examples(missing_cid, ["invoice", "stock_code", "customer_id"]),
-                "detail_en": "Customer analytics need an ID; IDs are never invented.",
-            }
-        )
-    if int(dups.sum()):
-        findings.append(
-            {
-                "id": "exact_duplicates",
-                "severity": "warning",
-                "title_en": "Exact duplicate lines",
-                "title_ar": "صفوف مكررة تمامًا",
-                "count": int(dups.sum()),
-                "examples": _examples(dups, ["invoice", "stock_code", "quantity"]),
+                "detail_en": "Anonymous lines stay in store totals; IDs are never invented.",
             }
         )
     if int(cancel.sum()):
@@ -280,11 +278,6 @@ def build_profile(
                 "title_ar": "مرشحات إلغاء / مرتجع",
                 "count": int(cancel.sum()),
                 "examples": _examples(cancel, ["invoice", "quantity", "unit_price"]),
-                "detail_en": (
-                    "Detected with conservative patterns (C#### or C-…), not every invoice "
-                    "starting with letter C (so CAI-… stays a normal sale)."
-                ),
-                "rule": "C#### or C-*",
             }
         )
     if int(missing_desc.sum()):
@@ -298,47 +291,89 @@ def build_profile(
             }
         )
 
-    date_min = str(eligible["invoice_date"].min()) if len(eligible) and eligible["invoice_date"].notna().any() else None
-    date_max = str(eligible["invoice_date"].max()) if len(eligible) and eligible["invoice_date"].notna().any() else None
+    if resolved.get("needs_user_mapping") and not meta.mapping_confirmed:
+        findings.insert(
+            0,
+            {
+                "id": "confirm_mapping",
+                "severity": "warning",
+                "title_en": "Confirm column mapping",
+                "title_ar": "أكّد ربط الأعمدة",
+                "count": len(mappings.get("ambiguous_columns") or [])
+                + sum(1 for m in mappings.get("mappings") or [] if m.get("needs_user_confirm")),
+                "detail_en": "Some headers are ambiguous or low-confidence — confirm before analysis.",
+            },
+        )
+
+    date_min = (
+        str(eligible["invoice_date"].min())
+        if len(eligible) and eligible["invoice_date"].notna().any()
+        else None
+    )
+    date_max = (
+        str(eligible["invoice_date"].max())
+        if len(eligible) and eligible["invoice_date"].notna().any()
+        else None
+    )
+    eff = resolved.get("effective_mapping") or {}
 
     return {
-        "ok": True,
+        "ok": bool(resolved.get("capabilities", {}).get("analysis_ready_minimum")),
         "validation": validation,
         "column_mappings": mappings,
         "classification": classification,
-        "row_count": int(len(df)),
-        "column_count": int(df.shape[1]),
-        "recognized_required": [
-            c for c in REQUIRED_SOURCE_COLUMNS if c in parsed.columns
-        ],
-        "extra_columns": validation.get("extra_columns") or [],
+        "row_count": int(len(raw)),
+        "column_count": int(raw.shape[1]),
+        "recognized_required": list(eff.keys()),
+        "extra_columns": [c for c in columns if c not in eff.values()],
         "preview_rows": preview_rows,
         "findings": findings,
         "structure": {
             "has_customer_id": bool(parsed["customer_id"].notna().any()),
-            "has_product_id": bool(parsed["stock_code"].notna().any()),
+            "has_product_id": bool(
+                parsed["stock_code"].notna().any() or parsed["description"].notna().any()
+            ),
             "unique_customers": int(parsed["customer_id"].dropna().nunique()),
-            "unique_products": int(parsed["stock_code"].dropna().nunique()),
-            "unique_invoices": int(parsed["invoice"].nunique()),
+            "unique_products": int(
+                parsed["stock_code"].replace("", pd.NA).dropna().nunique()
+                or parsed["description"].dropna().nunique()
+            ),
+            "unique_invoices": int(
+                parsed.loc[~parsed["invoice"].astype(str).str.match(r"^ROW-", na=False), "invoice"].nunique()
+            ),
             "cancellation_rows": int(cancel.sum()),
             "eligible_rows": int(len(eligible)),
             "eligible_spend": float(eligible["line_amount"].fillna(0).sum()),
             "date_min": date_min,
             "date_max": date_max,
-            "appears_transactional": classification["confidence"] >= 0.67,
+            "appears_transactional": classification["confidence"] >= 0.5,
         },
         "currency": {
             "code": meta.currency_code,
             "label": currency_label(meta),
             "selected": bool(meta.currency_code and meta.currency_code != "UNSPECIFIED"),
-            "note_en": "Currency is never inferred from amounts.",
-            "note_ar": "العملة مش بتتستنتج من الأرقام.",
+            "discovered_currencies": validation.get("discovered_currencies") or [],
+            "multi_currency": bool(validation.get("multi_currency")),
+            "analysis_currency_filter": meta.analysis_currency_filter,
+            "exclusion": dict(parsed.attrs.get("currency_exclusion") or {}),
+            "note_en": "Currency is never inferred from amounts. Blank or unknown currency rows are left out of a chosen total.",
+            "note_ar": "العملة مش بتتستنتج من الأرقام. صفوف العملة الفاضية أو غير المعروفة بتخرج من الإجمالي المختار.",
         },
         "date_format": validation.get("date_format"),
         "date_format_confirmed": meta.date_format_confirmed,
         "date_format_selected": meta.date_format,
-        "category_mapped": meta.has_category_mapped,
-        "category_column": meta.category_column,
+        "category_mapped": bool(eff.get("category") or meta.has_category_mapped),
+        "category_column": eff.get("category") or meta.category_column,
+        "mapping": resolved,
+        "needs_user_mapping": bool(resolved.get("needs_user_mapping")) and not meta.mapping_confirmed,
+        "mapping_confirmed": bool(meta.mapping_confirmed) or bool(resolved.get("mapping_confirmed")),
+        "workbook": {
+            "sheets": meta.workbook_sheets or [],
+            "selected_sheet": meta.selected_sheet,
+            "needs_sheet_selection": False,
+        },
+        "capabilities": resolved.get("capabilities"),
+        "capability_docs": cmap.capability_docs(),
         "source": "upload",
         "demo": False,
         "session_id": meta.session_id,

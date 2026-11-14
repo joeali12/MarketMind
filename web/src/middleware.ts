@@ -1,21 +1,16 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-/** Exact Stitch export screens — same HTML as static/stitch and the Downloads pack. */
-const STITCH: Record<string, string> = {
-  "/": "/stitch/welcome_upload_pipeline.html",
-  "/upload": "/stitch/welcome_upload_pipeline.html",
-  "/file-understanding": "/stitch/file_understanding_setup.html",
-  "/cleaning": "/stitch/data_cleaning_review.html",
-  "/store": "/stitch/store_dashboard.html",
-};
-
-export function middleware(request: NextRequest) {
-  const dest = STITCH[request.nextUrl.pathname];
-  if (!dest) return NextResponse.next();
-  return NextResponse.rewrite(new URL(dest, request.url));
+/**
+ * Stitch HTML exports live under /stitch/* for reference / Streamlit embeds.
+ * The live product UI is the Next.js App Router (upload → clean → dashboard).
+ * Do not rewrite product routes to static Stitch shells — that breaks E2E and
+ * the React upload journey.
+ */
+export function middleware(_request: NextRequest) {
+  return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/", "/upload", "/file-understanding", "/cleaning", "/store"],
+  matcher: [],
 };

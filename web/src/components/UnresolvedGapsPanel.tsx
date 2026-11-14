@@ -56,6 +56,7 @@ export function UnresolvedGapsPanel({
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState<string>("");
   const [saving, setSaving] = useState(false);
+  const [fillingKey, setFillingKey] = useState<string | null>(null);
 
   useEffect(() => {
     const next: Record<string, string> = {};
@@ -63,35 +64,78 @@ export function UnresolvedGapsPanel({
       for (const field of EDIT_FIELDS) {
         const key = `${r.row_index}:${field}`;
         const cur = r[field];
+        if (cur != null) next[key] = String(cur);
+      }
+    }
+    setDrafts((prev) => ({ ...next, ...prev }));
+  }, [rows]);
+
+  useEffect(() => {
+    if (gapFillPreference !== "smart") return;
+    const steps: { key: string; value: string }[] = [];
+    for (const r of rows) {
+      for (const field of r.issues || []) {
         const sug = r.suggestions?.[field];
-        if (cur == null && sug?.allowed && sug.suggested != null && gapFillPreference === "smart") {
-          next[key] = String(sug.suggested);
-        } else if (cur != null) {
-          next[key] = String(cur);
-        } else {
-          next[key] = drafts[key] ?? "";
+        const cur = r[field as keyof GapRow];
+        if (cur == null && sug?.allowed && sug.suggested != null) {
+          steps.push({ key: `${r.row_index}:${field}`, value: String(sug.suggested) });
         }
       }
     }
-    setDrafts((prev) => ({ ...prev, ...next }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- seed when rows/mode change
-  }, [rows, gapFillPreference]);
+    if (!steps.length) return;
+    let cancelled = false;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    (async () => {
+      if (reduce) {
+        setDrafts((prev) => {
+          const next = { ...prev };
+          for (const step of steps) next[step.key] = step.value;
+          return next;
+        });
+        return;
+      }
+      for (const step of steps) {
+        if (cancelled) return;
+        setFillingKey(step.key);
+        setDrafts((prev) => ({ ...prev, [step.key]: step.value }));
+        await new Promise((resolve) => setTimeout(resolve, 90));
+      }
+      if (!cancelled) setFillingKey(null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [gapFillPreference, rows]);
 
   function setCell(rowIndex: number, field: string, value: string) {
     setDrafts((d) => ({ ...d, [`${rowIndex}:${field}`]: value }));
   }
 
-  function applySmartToDrafts() {
-    const next = { ...drafts };
+  async function applySmartToDrafts() {
+    const steps: { key: string; value: string }[] = [];
     for (const r of rows) {
       for (const field of r.issues || []) {
         const sug = r.suggestions?.[field];
         if (sug?.allowed && sug.suggested != null) {
-          next[`${r.row_index}:${field}`] = String(sug.suggested);
+          steps.push({ key: `${r.row_index}:${field}`, value: String(sug.suggested) });
         }
       }
     }
-    setDrafts(next);
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) {
+      setDrafts((prev) => {
+        const next = { ...prev };
+        for (const step of steps) next[step.key] = step.value;
+        return next;
+      });
+    } else {
+      for (const step of steps) {
+        setFillingKey(step.key);
+        setDrafts((prev) => ({ ...prev, [step.key]: step.value }));
+        await new Promise((resolve) => setTimeout(resolve, 90));
+      }
+      setFillingKey(null);
+    }
     setMsg(
       lang === "ar"
         ? "اتحطت الاقتراحات الذكية في الخانات — راجعها قبل الحفظ."
@@ -313,7 +357,7 @@ export function UnresolvedGapsPanel({
                   <td>
                     {canEdit && issues.has("quantity") ? (
                       <input
-                        className="input gap-input"
+                        className={`input gap-input${fillingKey === `${r.row_index}:quantity` ? " is-filling" : ""}`}
                         value={drafts[`${r.row_index}:quantity`] ?? ""}
                         onChange={(e) => setCell(r.row_index, "quantity", e.target.value)}
                         placeholder={
@@ -334,7 +378,7 @@ export function UnresolvedGapsPanel({
                   <td>
                     {canEdit && issues.has("unit_price") ? (
                       <input
-                        className="input gap-input"
+                        className={`input gap-input${fillingKey === `${r.row_index}:unit_price` ? " is-filling" : ""}`}
                         value={drafts[`${r.row_index}:unit_price`] ?? ""}
                         onChange={(e) =>
                           setCell(r.row_index, "unit_price", e.target.value)
