@@ -11,7 +11,7 @@ Local **Next.js** (`web/`) + **FastAPI** (`api/`). Arabic RTL / English LTR. Ent
 ```bash
 source .venv/bin/activate
 uv pip install -r requirements.txt
-# Optional browser smoke / Playwright journeys:
+# Dev/CI extras (pytest, Playwright, Jupyter):
 # uv pip install -r requirements-dev.txt && playwright install chromium
 PYTHONPATH=src:. uvicorn api.main:app --reload --port 8000
 # other terminal
@@ -148,6 +148,7 @@ PY
 
 python scripts/run_eda.py
 python scripts/train_marketmind.py
+# uv pip install -r requirements-dev.txt   # once, for pytest / Playwright
 pytest -q
 # Product UI: uvicorn api.main:app + cd web && npm run dev
 # Academic UI (PDF / Community Cloud entrypoint): streamlit run app.py

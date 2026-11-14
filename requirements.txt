@@ -3,7 +3,8 @@
 # Streamlit Community Cloud should use runtime.txt (python-3.12). These pins match
 # the committed joblib pipelines (scikit-learn 1.9.1, joblib 1.6.0).
 # Install: uv venv .venv --python 3.12 && source .venv/bin/activate && uv pip install -r requirements.txt
-# Optional browser smoke: uv pip install -r requirements-dev.txt && playwright install chromium
+# Dev/CI (pytest, Playwright, Jupyter): uv pip install -r requirements-dev.txt
+# Optional browser smoke also needs: playwright install chromium
 
 pandas==3.1.1
 numpy==2.5.4
@@ -16,9 +17,6 @@ openpyxl==3.1.5
 xlrd==2.0.2
 pyarrow==26.0.1
 PyYAML==6.0.3
-pytest==9.2.0
-jupyter==1.1.1
-ucimlrepo==0.0.7
 fastapi==0.162.2
 uvicorn==0.54.0
 python-multipart==0.0.20

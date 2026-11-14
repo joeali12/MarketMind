@@ -73,11 +73,16 @@ web/node_modules/
 web/.next/
 web/.next.*/
 web/out/
+web/*.tsbuildinfo
 
-# Hugging Face / deploy caches
+# Local caches / agent scratch
 .cache/
-testsprite_tests/tmp/
-testsprite_tests/tmp/config.json
+testsprite_tests/
+tmp/
+outputs/
 
 # Local stress / scratch uploads (not for git)
 testdata/
+
+# Regenerated Streamlit academic shots (product shots stay committed)
+docs/screenshots/streamlit/
