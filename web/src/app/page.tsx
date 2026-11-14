@@ -8,59 +8,59 @@ const COPY = {
     brand: "MarketMind",
     headline: "فاهم عملاء متجرك من ملف مبيعات واحد",
     support:
-      "ارفع الـ CSV أو الإكسل، راجع التنظيف، واسأل المساعد بالعربي أو الإنجليزي — تحليل تجزئة وCLV للمتاجر الصغيرة.",
+      "ارفع CSV أو Excel، راجع التنظيف، واسأل المساعد بالعربي أو الإنجليزي — تجزئة وCLV للمتاجر الصغيرة.",
     cta: "يلا جرب",
     howTitle: "كيف تستخدمه",
     howLead: "ثلاث خطوات من الملف إلى لوحة التحليل.",
     steps: [
       {
-        n: "١",
+        n: "01",
         title: "ارفع ملفك",
-        body: "CSV أو Excel من نقطة البيع أو المتجر. نساعدك في اختيار الورقة والأعمدة إن لزم.",
+        body: "CSV أو Excel من نقطة البيع. نساعدك في الورقة والأعمدة عند الحاجة.",
       },
       {
-        n: "٢",
+        n: "02",
         title: "راجع التنظيف",
-        body: "اقتراحات واضحة لما يُصلح وما يبقى فجوة — بدون اختراع أرقام أو تواريخ.",
+        body: "اقتراحات واضحة لما يُصلح وما يبقى فجوة — بلا اختراع أرقام أو تواريخ.",
       },
       {
-        n: "٣",
+        n: "03",
         title: "اكتشف واسأل",
-        body: "لوحة المتجر والمنتجات والمجموعات، ومحادثة تفهم أوامرك على جلسة الرفع.",
+        body: "لوحات المتجر والمنتجات والمجموعات، ومساعد يعمل على جلسة الرفع.",
       },
     ],
     whyTitle: "ليه المشروع مهم",
     whyLead:
-      "متاجر مصر والمنطقة تملك بيانات يومية، لكن التحليل غالباً معقد أو مخصص لأسواق أخرى.",
+      "متاجر مصر والمنطقة تملك بيانات يومية، لكن التحليل غالباً معقد أو مبني لأسواق أخرى.",
     whyBody:
-      "MarketMind مشروع تخرج يقرّب ذكاء التجزئة: RFM وتجزئة K-Means وتقدير إنفاق مؤهل خلال ٩٠ يوماً — بواجهة ثنائية اللغة تبدأ من ملفك أنت.",
+      "MarketMind مشروع تخرج يقرّب ذكاء التجزئة: RFM، تجزئة K-Means، وتقدير إنفاق مؤهل خلال ٩٠ يوماً — بواجهة ثنائية اللغة تبدأ من ملفك.",
     finalTitle: "جاهز تجرب على بياناتك؟",
     finalCta: "يلا جرب",
-    foot: "مشروع تخرج · واجهة المنتج على Vercel · Streamlit للنسخة الأكاديمية فقط",
+    foot: "مشروع تخرج · المنتج على Vercel · Streamlit للنسخة الأكاديمية فقط",
   },
   en: {
     brand: "MarketMind",
     headline: "Understand your store’s customers from one sales file",
     support:
-      "Upload CSV or Excel, review cleaning, and chat in Arabic or English — segmentation and CLV built for SME retailers.",
-    cta: "Let’s try",
+      "Upload CSV or Excel, review cleaning, and chat in Arabic or English — segmentation and CLV for SME retailers.",
+    cta: "يلا جرب",
     howTitle: "How to use it",
     howLead: "Three steps from file to insight.",
     steps: [
       {
-        n: "1",
+        n: "01",
         title: "Upload your file",
         body: "CSV or Excel from POS or your store. We’ll help pick the sheet and columns when needed.",
       },
       {
-        n: "2",
+        n: "02",
         title: "Review cleaning",
         body: "Clear proposals for what to fix and what stays a gap — no invented IDs, dates, or quantities.",
       },
       {
-        n: "3",
+        n: "03",
         title: "Explore and ask",
-        body: "Store, products, and groups dashboards, plus an assistant that runs on your upload session.",
+        body: "Store, products, and groups dashboards, plus an assistant scoped to your upload session.",
       },
     ],
     whyTitle: "Why it matters",
@@ -69,7 +69,7 @@ const COPY = {
     whyBody:
       "MarketMind is a graduation product that brings retail intelligence closer: RFM, K-Means segments, and eligible spend in the next 90 days — bilingual UI that starts from your file.",
     finalTitle: "Ready to try it on your data?",
-    finalCta: "Let’s try",
+    finalCta: "يلا جرب",
     foot: "Graduation project · product UI on Vercel · Streamlit is academic PDF only",
   },
 } as const;
@@ -79,47 +79,49 @@ function LandingVisual() {
     <svg
       className="landing-visual"
       viewBox="0 0 640 360"
+      width={640}
+      height={360}
       role="img"
       aria-hidden
     >
       <defs>
         <linearGradient id="lv-panel" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.95" />
-          <stop offset="100%" stopColor="#e8f2ee" stopOpacity="0.9" />
+          <stop offset="0%" stopColor="#ffffff" />
+          <stop offset="100%" stopColor="#eff4ff" />
         </linearGradient>
         <linearGradient id="lv-bar" x1="0" y1="1" x2="0" y2="0">
-          <stop offset="0%" stopColor="#005338" />
-          <stop offset="100%" stopColor="#1a9a6c" />
+          <stop offset="0%" stopColor="#3525cd" />
+          <stop offset="100%" stopColor="#6b5ef0" />
         </linearGradient>
       </defs>
-      <rect x="24" y="28" width="592" height="304" rx="28" fill="url(#lv-panel)" />
-      <rect x="56" y="56" width="140" height="18" rx="9" fill="#0b1c30" opacity="0.12" />
-      <rect x="56" y="88" width="88" height="10" rx="5" fill="#005338" opacity="0.35" />
+      <rect x="24" y="28" width="592" height="304" rx="20" fill="url(#lv-panel)" stroke="#c7c4d8" strokeWidth="1" />
+      <rect x="56" y="56" width="152" height="16" rx="4" fill="#0b1c30" opacity="0.12" />
+      <rect x="56" y="84" width="96" height="8" rx="4" fill="#3525cd" opacity="0.35" />
       <g className="landing-visual-bars">
-        <rect x="72" y="210" width="36" height="72" rx="8" fill="url(#lv-bar)" opacity="0.55" />
-        <rect x="124" y="168" width="36" height="114" rx="8" fill="url(#lv-bar)" opacity="0.75" />
-        <rect x="176" y="140" width="36" height="142" rx="8" fill="url(#lv-bar)" />
-        <rect x="228" y="186" width="36" height="96" rx="8" fill="url(#lv-bar)" opacity="0.65" />
+        <rect x="72" y="210" width="40" height="72" rx="6" fill="url(#lv-bar)" opacity="0.45" />
+        <rect x="128" y="168" width="40" height="114" rx="6" fill="url(#lv-bar)" opacity="0.7" />
+        <rect x="184" y="140" width="40" height="142" rx="6" fill="url(#lv-bar)" />
+        <rect x="240" y="186" width="40" height="96" rx="6" fill="url(#lv-bar)" opacity="0.55" />
       </g>
       <path
         className="landing-visual-line"
         d="M320 250c28-42 52-68 78-78s52 6 78 28 48 38 72 22"
         fill="none"
-        stroke="#c59a3b"
-        strokeWidth="3.5"
+        stroke="#4f46e5"
+        strokeWidth="3"
         strokeLinecap="round"
       />
-      <circle cx="476" cy="222" r="7" fill="#c59a3b" />
-      <rect x="320" y="56" width="244" height="96" rx="16" fill="#0b1c30" opacity="0.06" />
-      <rect x="340" y="76" width="120" height="12" rx="6" fill="#0b1c30" opacity="0.18" />
-      <rect x="340" y="100" width="180" height="10" rx="5" fill="#005338" opacity="0.28" />
-      <rect x="340" y="122" width="96" height="10" rx="5" fill="#c59a3b" opacity="0.45" />
+      <circle cx="476" cy="222" r="6" fill="#3525cd" />
+      <rect x="320" y="56" width="244" height="100" rx="12" fill="#e2dfff" />
+      <rect x="340" y="78" width="128" height="10" rx="3" fill="#0b1c30" opacity="0.2" />
+      <rect x="340" y="100" width="184" height="8" rx="3" fill="#3525cd" opacity="0.35" />
+      <rect x="340" y="120" width="104" height="8" rx="3" fill="#4f46e5" opacity="0.45" />
       <g className="landing-visual-nodes">
-        <circle cx="560" cy="88" r="10" fill="#005338" />
-        <circle cx="528" cy="120" r="7" fill="#1a9a6c" />
+        <circle cx="560" cy="88" r="9" fill="#3525cd" />
+        <circle cx="528" cy="118" r="6" fill="#6b5ef0" />
         <path
-          d="M528 120c10-18 22-28 32-32"
-          stroke="#005338"
+          d="M528 118c10-16 22-26 32-30"
+          stroke="#3525cd"
           strokeWidth="2"
           fill="none"
           strokeLinecap="round"
@@ -157,20 +159,20 @@ export default function HomePage() {
 
       <section className="landing-section" aria-labelledby="how-title">
         <div className="landing-section-inner">
-          <h2 id="how-title" className="landing-section-title">
-            {t.howTitle}
-          </h2>
-          <p className="landing-section-lead">{t.howLead}</p>
+          <header className="landing-section-head">
+            <h2 id="how-title" className="landing-section-title">
+              {t.howTitle}
+            </h2>
+            <p className="landing-section-lead">{t.howLead}</p>
+          </header>
           <ol className="landing-steps">
             {t.steps.map((step) => (
               <li key={step.n} className="landing-step">
                 <span className="landing-step-n" aria-hidden>
                   {step.n}
                 </span>
-                <div>
-                  <h3>{step.title}</h3>
-                  <p>{step.body}</p>
-                </div>
+                <h3>{step.title}</h3>
+                <p>{step.body}</p>
               </li>
             ))}
           </ol>
