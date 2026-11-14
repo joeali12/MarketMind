@@ -116,23 +116,8 @@ def soft_reshape_cue(question: str) -> bool:
         o in q or o in q_low for o in objects
     ):
         return True
-    # Apply / confirm after a preview
-    if q_low.strip() in {
-        "apply",
-        "do it",
-        "confirm",
-        "yes",
-        "ok",
-        "طبّق",
-        "طبق",
-        "نفّذ",
-        "نفذ",
-        "موافق",
-        "أيوه",
-        "ايوه",
-        "تمام",
-    }:
-        return True
+    # Bare «طبّق» / apply / ok are NOT reshape cues by themselves — only valid
+    # when pending_transform is set (handled by the assistant router).
     return False
 
 

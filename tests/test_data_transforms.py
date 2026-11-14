@@ -228,6 +228,10 @@ def test_soft_reshape_cue_covers_user_screenshot_phrasing():
     assert plan_intent.soft_reshape_cue("remove the time from dates")
     assert plan_intent.soft_reshape_cue("شيل الـ 00:00:00 من التاريخ")
     assert not plan_intent.soft_reshape_cue("قارن مبيعات الشهر ده باللي قبله")
+    # Bare confirms must not steal cleaning / casual ok turns.
+    assert not plan_intent.soft_reshape_cue("طبّق")
+    assert not plan_intent.soft_reshape_cue("ok")
+    assert not plan_intent.soft_reshape_cue("تمام")
 
 
 def test_midnight_datetime_counts_as_time_to_strip():

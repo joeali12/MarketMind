@@ -852,15 +852,18 @@ def parse_transform_intent(
         out["confirm_apply"] = True
         return out
 
-    # Prefer LLM understanding for bilingual reshape asks when configured.
+    # Deterministic compile first (fast, offline). LLM fills gaps for spoken
+    # AR/EN that the heuristic misses. Privacy-blocked callers pass allow_llm=False.
+    planned = session_mutate.compile_plan(q, columns=cols, pending=pending)
+    if planned is not None:
+        if planned.get("op") == "refuse":
+            return planned
+        return planned
+
     if allow_llm and plan_intent.soft_reshape_cue(q):
         llm_plan = plan_intent.llm_compile_plan(q, columns=cols, lang=lang)
         if llm_plan is not None:
+            llm_plan = dict(llm_plan)
+            llm_plan["compiled_via_llm"] = True
             return llm_plan
-
-    planned = session_mutate.compile_plan(q, columns=cols, pending=pending)
-    if planned is None:
-        return None
-    if planned.get("op") == "refuse":
-        return planned
-    return planned
+    return None

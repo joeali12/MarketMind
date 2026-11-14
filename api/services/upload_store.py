@@ -301,18 +301,32 @@ def _mirror_session(session_id: str) -> None:
 
 
 def _ensure_local_session(session_id: str) -> None:
-    """Hydrate from durable blob when this isolate has no /tmp copy."""
-    path = _meta_path(session_id)
-    if path.exists():
-        return
+    """Hydrate/refresh from durable blob so warm isolates see other isolates' writes."""
     try:
         from api.services import session_blob
 
-        session_blob.hydrate_session_dir(session_id, _session_dir(session_id))
+        if not session_blob.blob_enabled():
+            return
+        # force=True: overwrite stale /tmp copies after another isolate mutated.
+        ok = session_blob.hydrate_session_dir(
+            session_id, _session_dir(session_id), force=True
+        )
+        if not ok and _meta_path(session_id).exists():
+            # Blob said expired/missing — drop local too.
+            shutil.rmtree(_session_dir(session_id), ignore_errors=True)
     except Exception:  # noqa: BLE001
         logger.warning(
             "blob_hydrate_skipped session_hash=%s", session_id_hash(session_id)
         )
+
+
+def _meta_expired(data: dict[str, Any], *, now: float | None = None) -> bool:
+    ts = now if now is not None else time.time()
+    try:
+        created = float(data.get("created_at") or 0)
+    except (TypeError, ValueError):
+        return True
+    return created <= 0 or (ts - created) > UPLOAD_TTL_SECONDS
 
 
 def load_meta(session_id: str) -> UploadSessionMeta:
@@ -321,6 +335,9 @@ def load_meta(session_id: str) -> UploadSessionMeta:
     if not path.exists():
         raise FileNotFoundError("Upload session not found or expired")
     data = json.loads(path.read_text())
+    if _meta_expired(data):
+        discard_session(session_id)
+        raise FileNotFoundError("Upload session not found or expired")
     allowed = {f.name for f in fields(UploadSessionMeta)}
     filtered = {k: v for k, v in data.items() if k in allowed}
     return UploadSessionMeta(**filtered)
@@ -329,7 +346,10 @@ def load_meta(session_id: str) -> UploadSessionMeta:
 def save_meta(meta: UploadSessionMeta) -> None:
     ensure_tmp_root()
     _session_dir(meta.session_id).mkdir(parents=True, exist_ok=True)
-    _meta_path(meta.session_id).write_text(json.dumps(asdict(meta)))
+    payload = asdict(meta)
+    # Not on the dataclass — used to prefer fresher local vs blob copies.
+    payload["updated_at"] = time.time()
+    _meta_path(meta.session_id).write_text(json.dumps(payload))
     _mirror_session(meta.session_id)
 
 

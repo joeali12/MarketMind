@@ -1,8 +1,10 @@
 """Durable upload-session mirror for serverless (/tmp is per-isolate).
 
 When ``BLOB_READ_WRITE_TOKEN`` is set (Vercel Blob), every session write is
-mirrored to private blob storage and missing local files are hydrated on read.
-Local filesystem remains the working copy for pandas I/O.
+mirrored to private blob storage and missing/stale local files are hydrated on
+read. Local filesystem remains the working copy for pandas I/O.
+
+Blob copies honor ``UPLOAD_TTL_SECONDS`` (not only the store's day-scale TTL).
 """
 
 from __future__ import annotations
@@ -10,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -47,6 +50,15 @@ def _pathname(session_id: str, name: str) -> str:
     return f"{_PREFIX}/{session_id}/{name}"
 
 
+def _session_file_names(extension: str) -> list[str]:
+    ext = extension or ""
+    return [
+        f"upload{ext}",
+        f"upload{ext}.pre_transform.bak",
+        f"upload{ext}.pre_safe_fill.bak",
+    ]
+
+
 def _headers(
     token: str,
     *,
@@ -65,7 +77,7 @@ def _headers(
         h["x-vercel-blob-access"] = access
         h["x-add-random-suffix"] = "0"
         h["x-allow-overwrite"] = "1" if allow_overwrite else "0"
-        # Sessions expire in hours; keep blob copies short-lived.
+        # Store-level ceiling; app TTL is enforced on hydrate via created_at.
         h["x-ttl-days"] = "1"
     if content_type:
         h["x-content-type"] = content_type
@@ -167,31 +179,79 @@ def sync_session_dir(session_id: str, directory: Path) -> None:
         put_bytes(_pathname(session_id, path.name), path.read_bytes(), content_type=ctype)
 
 
-def hydrate_session_dir(session_id: str, directory: Path, *, extension: str | None = None) -> bool:
-    """Restore session files from blob into ``directory``. Returns True if meta landed."""
+def _meta_expired(meta: dict[str, Any], *, now: float | None = None) -> bool:
+    from api.settings import UPLOAD_TTL_SECONDS
+
+    ts = now if now is not None else time.time()
+    try:
+        created = float(meta.get("created_at") or 0)
+    except (TypeError, ValueError):
+        created = 0.0
+    if created <= 0:
+        return True
+    return (ts - created) > UPLOAD_TTL_SECONDS
+
+
+def hydrate_session_dir(
+    session_id: str,
+    directory: Path,
+    *,
+    extension: str | None = None,
+    force: bool = False,
+) -> bool:
+    """Restore session files from blob into ``directory``.
+
+    Returns True if a non-expired meta landed. Expired blob copies are deleted
+    and return False. When ``force`` is True (default for warm isolates), local
+    files are overwritten from blob so another isolate's mutations are visible.
+    """
     if not blob_enabled():
         return False
     meta_bytes = get_bytes(_pathname(session_id, "meta.json"))
     if not meta_bytes:
         return False
+    try:
+        meta_obj = json.loads(meta_bytes.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    if not isinstance(meta_obj, dict):
+        return False
+    if _meta_expired(meta_obj):
+        discard_session_blobs(
+            session_id, extension=str(meta_obj.get("extension") or extension or "") or None
+        )
+        logger.info("blob_hydrate_expired session_id_prefix=%s", session_id[:8])
+        return False
+
     directory.mkdir(parents=True, exist_ok=True)
     meta_path = directory / "meta.json"
-    meta_path.write_bytes(meta_bytes)
-    ext = extension
-    if not ext:
+    refresh = force or not meta_path.exists()
+    if meta_path.exists() and meta_path.read_bytes() != meta_bytes:
         try:
-            ext = str(json.loads(meta_bytes.decode("utf-8")).get("extension") or "")
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            ext = ""
+            local_obj = json.loads(meta_path.read_text())
+            local_u = float(
+                local_obj.get("updated_at") or local_obj.get("created_at") or 0
+            )
+            blob_u = float(
+                meta_obj.get("updated_at") or meta_obj.get("created_at") or 0
+            )
+            # Prefer the newer copy so a just-written pending_transform is not
+            # clobbered by a slightly stale blob read on the same isolate.
+            refresh = blob_u > local_u
+        except (json.JSONDecodeError, TypeError, ValueError):
+            refresh = True
+    if refresh:
+        meta_path.write_bytes(meta_bytes)
+
+    ext = extension or str(meta_obj.get("extension") or "")
     if ext:
-        upload_name = f"upload{ext}"
-        data = get_bytes(_pathname(session_id, upload_name))
-        if data is not None:
-            (directory / upload_name).write_bytes(data)
-        bak_name = f"{upload_name}.pre_transform.bak"
-        bak = get_bytes(_pathname(session_id, bak_name))
-        if bak is not None:
-            (directory / bak_name).write_bytes(bak)
+        for name in _session_file_names(ext):
+            dest = directory / name
+            if not refresh and dest.exists():
+                continue
+            data = get_bytes(_pathname(session_id, name))
+            if data is not None:
+                dest.write_bytes(data)
     logger.info("blob_hydrate session_id_prefix=%s", session_id[:8])
     return True
 
@@ -201,11 +261,15 @@ def discard_session_blobs(session_id: str, *, extension: str | None = None) -> N
         return
     names = ["meta.json"]
     if extension:
-        names.append(f"upload{extension}")
-        names.append(f"upload{extension}.pre_transform.bak")
+        names.extend(_session_file_names(extension))
     else:
-        # Best-effort common extensions when meta already gone locally.
         for ext in (".csv", ".xlsx"):
-            names.append(f"upload{ext}")
-            names.append(f"upload{ext}.pre_transform.bak")
-    delete_pathnames([_pathname(session_id, n) for n in names])
+            names.extend(_session_file_names(ext))
+    # Unique while preserving order
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for n in names:
+        if n not in seen:
+            seen.add(n)
+            ordered.append(n)
+    delete_pathnames([_pathname(session_id, n) for n in ordered])

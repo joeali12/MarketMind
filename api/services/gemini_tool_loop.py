@@ -269,15 +269,22 @@ def grounded_tool_answer(
     question: str,
     lang: str,
     meta: UploadSessionMeta,
+    parsed_intent: dict[str, Any] | None = None,
+    allow_llm: bool = True,
 ) -> dict[str, Any]:
     """Deterministic multi-tool fallback when Gemini is unavailable.
 
     Heuristically selects tools from the question and composes a grounded reply.
+    Pass ``parsed_intent`` when the caller already compiled the transform once
+    (avoids a second LLM plan call). Set ``allow_llm=False`` on privacy-blocked paths.
     """
     q = (question or "").lower()
     ar = lang == "ar"
     called: list[str] = []
     parts: list[str] = []
+    compiled_via_llm = bool(
+        parsed_intent and parsed_intent.get("compiled_via_llm")
+    )
 
     def use(name: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
         called.append(name)
@@ -354,9 +361,17 @@ def grounded_tool_answer(
     # Allowlisted session-file transforms (date strip, invoice flags, …)
     from api.services import data_transforms as _dx
 
-    parsed = _dx.parse_transform_intent(
-        question, pending=getattr(meta, "pending_transform", None), meta=meta
-    )
+    parsed = parsed_intent
+    if parsed is None:
+        parsed = _dx.parse_transform_intent(
+            question,
+            pending=getattr(meta, "pending_transform", None),
+            meta=meta,
+            lang=lang,
+            allow_llm=allow_llm,
+        )
+        if parsed and parsed.get("compiled_via_llm"):
+            compiled_via_llm = True
     if parsed and parsed.get("op") == "refuse":
         parts.append(
             parsed.get("message_ar") if ar else parsed.get("message_en") or ""
@@ -368,7 +383,14 @@ def grounded_tool_answer(
         args = {
             k: v
             for k, v in parsed.items()
-            if k not in {"confirm_apply", "error_code", "message_en", "message_ar"}
+            if k
+            not in {
+                "confirm_apply",
+                "error_code",
+                "message_en",
+                "message_ar",
+                "compiled_via_llm",
+            }
             and v is not None
         }
         if parsed.get("confirm_apply"):
@@ -478,6 +500,7 @@ def grounded_tool_answer(
         "tools_called": called,
         "mode": "grounded_facts",
         "mutated": bool(mutated),
+        "compiled_via_llm": bool(compiled_via_llm),
     }
 
 

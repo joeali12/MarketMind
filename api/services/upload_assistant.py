@@ -656,7 +656,9 @@ def _transform_turn_result(
         "session_id": profile.get("session_id") or (meta.session_id if meta else None),
         "demo": False,
         "raw_rows_sent_externally": False,
-        "raw_user_question_sent_externally": False,
+        "raw_user_question_sent_externally": bool(
+            open_result.get("raw_user_question_sent_externally")
+        ),
         "fallback_used": bool(open_result.get("fallback_used")),
         "privacy_disclosure_en": (
             "When AI assist is on, your question may be sent to Google’s Gemini API "
@@ -697,11 +699,24 @@ def _open_ended_analytics_turn(
         # Still honor safe transform commands locally (no Gemini / no raw rows out).
         from api.services import data_transforms as _dx
 
-        if meta is not None and _dx.parse_transform_intent(
-            question, pending=getattr(meta, "pending_transform", None), meta=meta
-        ):
+        parsed = (
+            _dx.parse_transform_intent(
+                question,
+                pending=getattr(meta, "pending_transform", None),
+                meta=meta,
+                lang=lang,
+                allow_llm=False,
+            )
+            if meta is not None
+            else None
+        )
+        if parsed:
             grounded = gemini_tool_loop.grounded_tool_answer(
-                question=question, lang=lang, meta=meta
+                question=question,
+                lang=lang,
+                meta=meta,
+                parsed_intent=parsed,
+                allow_llm=False,
             )
             answer = grounded.get("answer") or ""
             return {
@@ -763,17 +778,31 @@ def _open_ended_analytics_turn(
         grounded["raw_user_question_sent_externally"] = False
         return grounded
 
-    # Deterministic session transforms take priority over Gemini so clear
-    # commands (strip time, add invoice flag, …) never get refused/clarified away.
+    # Session transforms take priority over open Q&A so reshape asks never
+    # fall through to generic upload stats. Compile once, then execute.
     from api.services import data_transforms as _dx
 
-    if meta is not None and _dx.parse_transform_intent(
-        question, pending=getattr(meta, "pending_transform", None), meta=meta
-    ):
+    parsed = (
+        _dx.parse_transform_intent(
+            question,
+            pending=getattr(meta, "pending_transform", None),
+            meta=meta,
+            lang=lang,
+            allow_llm=True,
+        )
+        if meta is not None
+        else None
+    )
+    if parsed:
         grounded = gemini_tool_loop.grounded_tool_answer(
-            question=question, lang=lang, meta=meta
+            question=question,
+            lang=lang,
+            meta=meta,
+            parsed_intent=parsed,
+            allow_llm=False,
         )
         answer = grounded.get("answer") or ""
+        sent_externally = bool(parsed.get("compiled_via_llm"))
         return {
             "answer_en": answer,
             "answer_ar": answer,
@@ -798,7 +827,7 @@ def _open_ended_analytics_turn(
                 if grounded.get("mutated")
                 else []
             ),
-            "raw_user_question_sent_externally": False,
+            "raw_user_question_sent_externally": sent_externally,
         }
 
     loop = gemini_tool_loop.run_tool_assisted_turn(
@@ -828,6 +857,7 @@ def _open_ended_analytics_turn(
             "actions": (
                 [{"type": "refresh_after_mutation"}] if loop.mutated else []
             ),
+            "raw_user_question_sent_externally": True,
         }
 
     grounded = gemini_tool_loop.grounded_tool_answer(
