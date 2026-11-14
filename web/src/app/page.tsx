@@ -36,7 +36,6 @@ const COPY = {
       "MarketMind مشروع تخرج يقرّب ذكاء التجزئة: RFM، تجزئة K-Means، وتقدير إنفاق مؤهل خلال ٩٠ يوماً — بواجهة ثنائية اللغة تبدأ من ملفك.",
     finalTitle: "جاهز تجرب على بياناتك؟",
     finalCta: "يلا جرب",
-    foot: "مشروع تخرج · المنتج على Vercel · Streamlit للنسخة الأكاديمية فقط",
   },
   en: {
     brand: "MarketMind",
@@ -70,7 +69,6 @@ const COPY = {
       "MarketMind is a graduation product that brings retail intelligence closer: RFM, K-Means segments, and eligible spend in the next 90 days — bilingual UI that starts from your file.",
     finalTitle: "Ready to try it on your data?",
     finalCta: "يلا جرب",
-    foot: "Graduation project · product UI on Vercel · Streamlit is academic PDF only",
   },
 } as const;
 
@@ -195,8 +193,6 @@ export default function HomePage() {
           {t.finalCta}
         </Link>
       </section>
-
-      <p className="landing-foot">{t.foot}</p>
     </main>
   );
 }

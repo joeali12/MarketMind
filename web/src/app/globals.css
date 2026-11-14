@@ -2017,7 +2017,7 @@ html[dir="rtl"] .landing-brand {
 .landing-final {
   text-align: center;
   padding: calc(var(--landing-space) * 4) calc(var(--landing-space) * 1.5)
-    calc(var(--landing-space) * 2.5);
+    calc(var(--landing-space) * 4);
 }
 
 .landing-final h2 {
@@ -2026,15 +2026,6 @@ html[dir="rtl"] .landing-brand {
   line-height: 1.3;
   letter-spacing: -0.02em;
   text-wrap: balance;
-}
-
-.landing-foot {
-  margin: 0;
-  padding: 0 calc(var(--landing-space) * 1.5) calc(var(--landing-space) * 3);
-  text-align: center;
-  color: var(--muted);
-  font-size: 0.8125rem;
-  line-height: 1.5;
 }
 
 @keyframes landing-rise {
