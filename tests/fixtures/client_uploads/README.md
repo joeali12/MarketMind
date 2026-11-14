@@ -3,7 +3,7 @@
 Synthetic fixtures are **labeled synthetic** and are for schema/compatibility tests only.
 They are **not** academic model-quality evidence.
 
-The Egypt CSV/XLSX files are a **real retail sample** (symlink) used for product upload isolation journeys. They are **not** part of the UCI academic training evidence.
+The Egypt CSV/XLSX files are a **real retail sample** (committed fixtures, not symlinks) used for product upload isolation journeys. They are **not** part of the UCI academic training evidence.
 
 See `matrix_manifest.json` for per-fixture currency, date format, mapping, and expected sales.
 
