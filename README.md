@@ -60,14 +60,11 @@ Synthetic fixtures test **behavior only** — not model quality.
 
 ## Streamlit Community Cloud (academic app)
 
-**Not published.** No live URL has been created or tested. When you publish, use the existing GitHub repository and branch you actually push (this checkout tracks `main`).
+**Live:** https://marketmind-grad.streamlit.app/
 
-1. https://share.streamlit.io → New app → that GitHub repository.
-2. Branch: `main`.
-3. Main file path: `app.py`.
-4. Python comes from `runtime.txt` (`python-3.12`). Leave secrets empty. Do not add `.env`.
+Deployed from `joeali12/MarketMind` · `main` · `app.py` · Python 3.12 · no secrets. Anonymous access works (`viewerAuthEnabled=false`). LinkedIn/CV drafts stay unpublished.
 
-The Cloud app reads committed artifacts and the small derived parquet files in `docs/deployment.md`. It does not need `data/raw/online_retail_II.xlsx`. Record a URL in this README only after that URL loads and the six pages are checked.
+The Cloud app reads committed artifacts and the small derived parquet files in `docs/deployment.md`. It does not need `data/raw/online_retail_II.xlsx`.
 
 ## Screenshots (current product UI)
 
@@ -178,7 +175,7 @@ Units: **eligible positive spend** over 90 days in **GBP (£)** (UCI dataset des
 - High zero-target rates in the academic 90-day window
 - Target is eligible positive spend (D5), not net revenue after refunds
 - Currency GBP (£) for demo from UCI description; uploads never assume EGP/GBP/USD from filename
-- Not a commercial multi-tenant SaaS; Streamlit Cloud package is prepared, not published (D8)
+- Not a commercial multi-tenant SaaS; Streamlit Cloud academic app is published at https://marketmind-grad.streamlit.app/ (D8 Streamlit approved; LinkedIn still unpublished)
 
 ## Docs
 
