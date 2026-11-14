@@ -1764,12 +1764,6 @@ th {
   border-bottom-color: var(--border-soft);
 }
 
-.lang-chrome-cta {
-  text-decoration: none;
-  white-space: nowrap;
-  font-family: var(--font-ar-display);
-}
-
 .landing {
   --landing-space: 16px;
   position: relative;
