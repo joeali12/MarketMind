@@ -1092,7 +1092,9 @@ def upload_restore_safe_fill(body: RestoreSafeFillBody) -> dict[str, Any]:
             detail=result.get("message_en") or result.get("error_code") or "restore_failed",
         )
     path = upload_store.upload_path(body.session_id)
-    restored_df = clean_svc.read_upload_dataframe(path, nrows=None)
+    restored_df = clean_svc.read_upload_dataframe(
+        path, nrows=None, sheet_name=meta.selected_sheet
+    )
     refreshed = clean_svc.build_proposals(
         restored_df,
         date_format=meta.date_format,
@@ -1128,7 +1130,9 @@ def upload_gap_fill(body: GapFillBody) -> dict[str, Any]:
             detail="Confirm the file summary before filling gaps",
         )
 
-    raw = clean_svc.read_upload_dataframe(path, nrows=None)
+    raw = clean_svc.read_upload_dataframe(
+        path, nrows=None, sheet_name=meta.selected_sheet
+    )
     proposals = clean_svc.build_proposals(
         raw,
         date_format=meta.date_format,
@@ -1162,7 +1166,9 @@ def upload_gap_fill(body: GapFillBody) -> dict[str, Any]:
     updated, applied = gap_fill_svc.apply_patches_to_source(
         raw, patches, column_mapping=meta.column_mapping
     )
-    gap_fill_svc.write_source_dataframe(path, updated)
+    gap_fill_svc.write_source_dataframe(
+        path, updated, sheet_name=meta.selected_sheet
+    )
     meta.byte_size = path.stat().st_size
     upload_store.save_meta(meta)
 
@@ -1325,10 +1331,17 @@ def upload_customers(session_id: str, limit: int = 100, q: str | None = None) ->
 
 
 @app.get("/api/upload/{session_id}/customers/{customer_id}")
-def upload_customer_profile(session_id: str, customer_id: int) -> dict[str, Any]:
+def upload_customer_profile(session_id: str, customer_id: str) -> dict[str, Any]:
     meta = _upload_meta(session_id)
     try:
-        return upload_analytics.customer_profile(meta, customer_id)
+        # Keep alphanumeric IDs; coerce pure integers when possible.
+        cid: int | str = customer_id
+        try:
+            if customer_id.strip().lstrip("-").isdigit():
+                cid = int(customer_id)
+        except ValueError:
+            cid = customer_id
+        return upload_analytics.customer_profile(meta, cid)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

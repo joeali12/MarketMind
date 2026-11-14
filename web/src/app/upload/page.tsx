@@ -489,13 +489,14 @@ export default function UploadPage() {
 
   function isAllowedUpload(file: File): boolean {
     const name = file.name.toLowerCase();
+    // API allows .csv / .xlsx only (not legacy .xls).
     return (
       name.endsWith(".csv") ||
       name.endsWith(".xlsx") ||
-      name.endsWith(".xls") ||
       file.type.includes("csv") ||
-      file.type.includes("sheet") ||
-      file.type.includes("excel")
+      file.type.includes(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      )
     );
   }
 
@@ -1021,7 +1022,7 @@ export default function UploadPage() {
               >
                 <input
                   type="file"
-                  accept=".csv,.xlsx,.xls"
+                  accept=".csv,.xlsx"
                   disabled={busy}
                   aria-label={lang === "ar" ? "اختر ملف المبيعات" : "Browse sales file"}
                   onChange={(e) => onFile(e.target.files?.[0] || null)}
@@ -1064,7 +1065,6 @@ export default function UploadPage() {
                 <div className="format-pills" aria-hidden>
                   <span>.CSV</span>
                   <span>.XLSX</span>
-                  <span>.XLS</span>
                 </div>
                 {dropFeedback && (
                   <p
@@ -1111,7 +1111,7 @@ export default function UploadPage() {
               <input
                 className="input-file"
                 type="file"
-                accept=".csv,.xlsx,.xls"
+                accept=".csv,.xlsx"
                 disabled={busy}
                 onChange={(e) => onFile(e.target.files?.[0] || null)}
               />

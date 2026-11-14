@@ -92,7 +92,16 @@ export function ColumnMappingPanel({
   async function confirm() {
     setErr(null);
     try {
-      await onConfirmed(draft);
+      // Explicit empties so ignored auto-mapped fields are not restored by merge_user_mapping.
+      const payload: Record<string, string> = { ...draft };
+      for (const sug of suggestions) {
+        const chosen = sourceToCanon[sug.source_column] || "ignore";
+        const target = sug.target;
+        if (chosen === "ignore" && target && target !== "ignore") {
+          payload[target] = "";
+        }
+      }
+      await onConfirmed(payload);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }

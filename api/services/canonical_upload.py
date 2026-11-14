@@ -336,11 +336,20 @@ def validate_for_upload(meta: UploadSessionMeta, *, sample_nrows: int = 500) -> 
     currencies: list[str] = []
     cur_src = mapping.get("row_currency")
     if cur_src and cur_src in raw.columns:
+        # Discover across analyzed rows, not only the validation sample head.
+        currency_series = raw[cur_src]
+        if sample_nrows is not None:
+            try:
+                full_cur = read_raw_source(meta, nrows=None)
+                if cur_src in full_cur.columns:
+                    currency_series = full_cur[cur_src]
+            except Exception:  # noqa: BLE001
+                pass
         currencies = sorted(
             {
                 str(v).strip().upper()
-                for v in raw[cur_src].dropna().unique().tolist()
-                if str(v).strip()
+                for v in currency_series.dropna().unique().tolist()
+                if str(v).strip() and str(v).strip().upper() not in {"", "NAN", "NONE", "<NA>"}
             }
         )
 

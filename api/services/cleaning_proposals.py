@@ -160,12 +160,28 @@ def validate_upload_frame(df: pd.DataFrame) -> dict[str, Any]:
     }
 
 
-def _eligible_mask(parsed: pd.DataFrame) -> pd.Series:
-    return (
-        (~parsed["is_cancellation"])
-        & (parsed["quantity"] > 0)
-        & (parsed["unit_price"] >= 0)
+def _line_amount_money_mode(parsed: pd.DataFrame) -> bool:
+    """True when money comes from mapped line totals (unit_price unused/absent)."""
+    if "line_amount" not in parsed.columns:
+        return False
+    if "money_source" in parsed.columns:
+        src = parsed["money_source"].astype("string")
+        return bool(src.notna().any()) and not bool(src.eq("qty_x_unit_price").any())
+    return bool(parsed["line_amount"].notna().any()) and (
+        "unit_price" not in parsed.columns or bool(parsed["unit_price"].isna().all())
     )
+
+
+def _eligible_mask(parsed: pd.DataFrame) -> pd.Series:
+    cancel = (
+        ~parsed["is_cancellation"]
+        if "is_cancellation" in parsed.columns
+        else pd.Series(True, index=parsed.index)
+    )
+    if _line_amount_money_mode(parsed):
+        qty_ok = parsed["quantity"].isna() | (parsed["quantity"] > 0)
+        return cancel & qty_ok & (parsed["line_amount"].fillna(0) > 0)
+    return cancel & (parsed["quantity"] > 0) & (parsed["unit_price"] >= 0)
 
 
 def _estimate_impact(parsed: pd.DataFrame, drop_mask: pd.Series) -> dict[str, Any]:
@@ -290,17 +306,39 @@ def build_proposals(
             }
         )
 
-    bad_qty_price = parsed["quantity"].isna() | parsed["unit_price"].isna()
-    if int(bad_qty_price.sum()):
-        impact = _estimate_impact(parsed, bad_qty_price)
+    if _line_amount_money_mode(parsed):
+        bad_money = parsed["line_amount"].isna()
+        money_title_en = "Drop rows with missing line total"
+        money_title_ar = "احذف الصفوف الناقص فيها إجمالي السطر"
+        money_reason_en = (
+            "Mapped line totals are treated as complete monetary values; "
+            "missing line amounts are not invented from quantity × unit price."
+        )
+        money_reason_ar = (
+            "إجمالي السطر المربوط بيتعامل كقيمة نقدية كاملة؛ "
+            "المبالغ الناقصة مش هتتخمّن من كمية × سعر."
+        )
+    else:
+        bad_money = parsed["quantity"].isna() | parsed["unit_price"].isna()
+        money_title_en = "Drop rows with missing quantity or unit price"
+        money_title_ar = "احذف الصفوف الناقص فيها الكمية أو السعر"
+        money_reason_en = (
+            "Non-numeric or missing quantity/price after coercion. "
+            "Missing amounts are not filled in."
+        )
+        money_reason_ar = (
+            "كمية أو سعر ناقص/مش رقمي بعد التحويل. مش هنخمّن المبالغ الناقصة."
+        )
+    if int(bad_money.sum()):
+        impact = _estimate_impact(parsed, bad_money)
         proposals.append(
             {
                 "id": "drop_non_finite_qty_price",
-                "title_en": "Drop rows with missing quantity or unit price",
-                "title_ar": "احذف الصفوف الناقص فيها الكمية أو السعر",
-                "reason_en": "Non-numeric or missing quantity/price after coercion. Missing amounts are not filled in.",
-                "reason_ar": "كمية أو سعر ناقص/مش رقمي بعد التحويل. مش هنخمّن المبالغ الناقصة.",
-                "rows_affected": int(bad_qty_price.sum()),
+                "title_en": money_title_en,
+                "title_ar": money_title_ar,
+                "reason_en": money_reason_en,
+                "reason_ar": money_reason_ar,
+                "rows_affected": int(bad_money.sum()),
                 "estimated_impact": impact,
                 "invents_values": False,
                 "destructive": True,

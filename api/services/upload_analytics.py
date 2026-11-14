@@ -13,7 +13,14 @@ import pandas as pd
 from api.services import cleaning_proposals as clean_svc
 from api.services import canonical_upload
 from api.services import upload_forecast
-from api.services.upload_store import UploadSessionMeta, currency_label, load_meta, upload_path
+from api.services.gap_fill import _serialize_customer_id
+from api.services.upload_store import (
+    UploadSessionMeta,
+    currency_label,
+    effective_currency_code,
+    load_meta,
+    upload_path,
+)
 
 
 def _provisional_upload_action(row: Any) -> dict[str, Any] | None:
@@ -296,7 +303,7 @@ def overview(meta: UploadSessionMeta) -> dict[str, Any]:
             "date_min": date_min,
             "date_max": date_max,
             "eligible_rows": int(len(eligible)),
-            "sales_gbp": sales if meta.currency_code == "GBP" else None,
+            "sales_gbp": sales if effective_currency_code(meta) == "GBP" else None,
             "orders_available": order_available,
             "customers_available": has_customer,
             "trends_available": date_ok,
@@ -771,7 +778,7 @@ def segment_customers(
     page = subset.iloc[offset : offset + limit]
     customers = [
         {
-            "customer_id": int(r.customer_id) if pd.notna(r.customer_id) else None,
+            "customer_id": _serialize_customer_id(r.customer_id),
             "recency": float(r.recency),
             "frequency": float(r.frequency),
             "monetary": float(r.monetary),
@@ -796,17 +803,22 @@ def list_customers(meta: UploadSessionMeta, *, limit: int = 100, q: str | None =
     eligible = parsed.loc[canonical_upload.eligible_for_upload(parsed)]
     rfm = _customer_rfm(eligible)
     if q:
+        q_text = str(q).strip()
         try:
-            qid = float(q)
-            rfm = rfm[rfm["customer_id"] == qid]
+            qid = float(q_text)
+            numeric_hit = rfm[rfm["customer_id"] == qid]
+            if len(numeric_hit):
+                rfm = numeric_hit
+            else:
+                rfm = rfm[rfm["customer_id"].astype(str) == q_text]
         except ValueError:
-            rfm = rfm.iloc[0:0]
+            rfm = rfm[rfm["customer_id"].astype(str) == q_text]
     rfm = rfm.sort_values("monetary", ascending=False).head(limit)
     return _envelope(
         meta,
         customers=[
             {
-                "customer_id": int(r.customer_id),
+                "customer_id": _serialize_customer_id(r.customer_id),
                 "recency": float(r.recency),
                 "frequency": float(r.frequency),
                 "monetary": float(r.monetary),
@@ -818,16 +830,23 @@ def list_customers(meta: UploadSessionMeta, *, limit: int = 100, q: str | None =
     )
 
 
-def customer_profile(meta: UploadSessionMeta, customer_id: int) -> dict[str, Any]:
+def customer_profile(meta: UploadSessionMeta, customer_id: int | str) -> dict[str, Any]:
     require_analysis_ready(meta)
     parsed = load_parsed_frame(meta)
     eligible = parsed.loc[canonical_upload.eligible_for_upload(parsed)]
     rfm = _customer_rfm(eligible)
-    match = rfm[rfm["customer_id"] == float(customer_id)]
+    cid_key = _serialize_customer_id(customer_id)
+    match = rfm[rfm["customer_id"] == cid_key]
+    if match.empty:
+        # Fallback string compare for mixed dtype frames
+        match = rfm[rfm["customer_id"].astype(str) == str(customer_id)]
     if match.empty:
         raise FileNotFoundError("Customer not found in upload session")
     row = match.iloc[0]
-    hist = eligible[eligible["customer_id"] == float(customer_id)].sort_values("invoice_date")
+    hist = eligible[
+        (eligible["customer_id"] == cid_key)
+        | (eligible["customer_id"].astype(str) == str(customer_id))
+    ].sort_values("invoice_date")
     products = (
         hist.groupby(["stock_code", "description"], dropna=False)
         .agg(quantity=("quantity", "sum"), spend=("line_amount", "sum"), lines=("invoice", "nunique"))
@@ -863,7 +882,7 @@ def customer_profile(meta: UploadSessionMeta, customer_id: int) -> dict[str, Any
     return _envelope(
         meta,
         customer={
-            "customer_id": customer_id,
+            "customer_id": _serialize_customer_id(row.customer_id) or cid_key,
             "recency": float(row.recency),
             "frequency": float(row.frequency),
             "monetary": float(row.monetary),

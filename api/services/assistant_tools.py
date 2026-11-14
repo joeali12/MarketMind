@@ -536,7 +536,9 @@ def tool_apply_safe_fills(meta: UploadSessionMeta, args: dict[str, Any]) -> dict
     updated, applied = gap_fill.apply_patches_to_source(
         raw, patches, column_mapping=meta.column_mapping
     )
-    gap_fill.write_source_dataframe(path, updated)
+    gap_fill.write_source_dataframe(
+        path, updated, sheet_name=meta.selected_sheet
+    )
     meta.byte_size = path.stat().st_size
     upload_store.save_meta(meta)
     fields_filled: dict[str, int] = {}

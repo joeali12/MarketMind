@@ -322,13 +322,25 @@ def write_export(session_id: str, content: bytes, name: str = "cleaned.csv") -> 
     return out
 
 
+def effective_currency_code(meta: UploadSessionMeta) -> str | None:
+    """Currency that labels filtered totals (analysis filter wins when set)."""
+    filt = (meta.analysis_currency_filter or "").strip().upper()
+    if filt:
+        return filt
+    code = (meta.currency_code or "").strip().upper()
+    if code and code != "UNSPECIFIED":
+        return code
+    return None
+
+
 def currency_label(meta: UploadSessionMeta) -> str:
     """Human label for UI — never default uploaded amounts to GBP."""
-    if not meta.currency_code or meta.currency_code == "UNSPECIFIED":
+    code = effective_currency_code(meta)
+    if not code:
         return "source currency (not selected)"
-    if meta.currency_code == "OTHER":
+    if code == "OTHER":
         return "other (user-selected)"
-    return meta.currency_code
+    return code
 
 
 def safe_log_outcome(

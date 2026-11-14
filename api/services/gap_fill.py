@@ -77,14 +77,50 @@ def _unambiguous_description(descs: pd.Series) -> tuple[str | None, dict[str, An
     return str(unique[0]), evidence
 
 
+def _serialize_customer_id(val: Any) -> int | float | str | None:
+    """Keep alphanumeric customer IDs as strings; numeric IDs stay numbers."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return None
+    try:
+        if pd.isna(val):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(val, bool):
+        return str(val)
+    if isinstance(val, int):
+        return int(val)
+    if isinstance(val, float):
+        return int(val) if val.is_integer() else float(val)
+    text = str(val).strip()
+    if not text or text.lower() in {"nan", "none", "<na>"}:
+        return None
+    try:
+        num = float(text)
+        return int(num) if num.is_integer() else num
+    except ValueError:
+        return text
+
+
+def _line_amount_complete(row: pd.Series) -> bool:
+    """Mapped line totals satisfy money without requiring unit_price."""
+    if "money_source" in row.index and str(row.get("money_source")) == "line_amount":
+        return pd.notna(row.get("line_amount"))
+    return pd.notna(row.get("line_amount")) and pd.isna(row.get("unit_price"))
+
+
 def _issues_for_row(row: pd.Series) -> list[str]:
     issues = []
     if pd.isna(row.get("invoice_date")):
         issues.append("invoice_date")
     if pd.isna(row.get("quantity")):
         issues.append("quantity")
-    if pd.isna(row.get("unit_price")):
+    if pd.isna(row.get("unit_price")) and not _line_amount_complete(row):
         issues.append("unit_price")
+    if pd.isna(row.get("line_amount")) and _line_amount_complete(row) is False:
+        # Only flag line_amount when that is the monetary path and it is missing
+        if "money_source" in row.index and str(row.get("money_source")) == "line_amount":
+            issues.append("line_amount")
     if pd.isna(row.get("customer_id")):
         issues.append("customer_id")
     if pd.isna(row.get("description")):
@@ -110,10 +146,21 @@ def suggest_for_parsed(parsed: pd.DataFrame, *, limit: int = 25) -> dict[str, An
             "note_ar": "مفيش صفوف للمراجعة.",
         }
 
+    unit_price_gap = parsed["unit_price"].isna()
+    if "money_source" in parsed.columns:
+        line_ok = parsed["money_source"].astype("string").eq("line_amount") & parsed[
+            "line_amount"
+        ].notna()
+        unit_price_gap = unit_price_gap & ~line_ok
+    elif "line_amount" in parsed.columns:
+        line_ok = parsed["line_amount"].notna() & parsed["unit_price"].isna()
+        # If every row with money uses line_amount only, don't treat unit_price as required
+        if bool(parsed["unit_price"].isna().all()) and bool(parsed["line_amount"].notna().any()):
+            unit_price_gap = parsed["line_amount"].isna()
     mask = (
         parsed["invoice_date"].isna()
         | parsed["quantity"].isna()
-        | parsed["unit_price"].isna()
+        | unit_price_gap
         | parsed["customer_id"].isna()
         | parsed["description"].isna()
         | parsed["invoice"].isna()
@@ -214,9 +261,7 @@ def suggest_for_parsed(parsed: pd.DataFrame, *, limit: int = 25) -> dict[str, An
                 "unit_price": None
                 if pd.isna(row.get("unit_price"))
                 else float(row.get("unit_price")),
-                "customer_id": None
-                if pd.isna(row.get("customer_id"))
-                else float(row.get("customer_id")),
+                "customer_id": _serialize_customer_id(row.get("customer_id")),
                 "invoice_date": None
                 if pd.isna(row.get("invoice_date"))
                 else str(row.get("invoice_date")),
@@ -310,14 +355,42 @@ def apply_patches_to_source(
     return out, applied
 
 
-def write_source_dataframe(path, df: pd.DataFrame) -> None:
-    suffix = str(path).lower()
-    if suffix.endswith(".csv"):
-        df.to_csv(path, index=False)
-    elif suffix.endswith(".xlsx"):
-        df.to_excel(path, index=False)
-    else:
-        raise ValueError("Unsupported file type")
+def write_source_dataframe(
+    path,
+    df: pd.DataFrame,
+    *,
+    sheet_name: str | None = None,
+) -> None:
+    """Write the session file. For multi-sheet Excel, replace only ``sheet_name``."""
+    from pathlib import Path
+
+    p = Path(path)
+    suffix = p.suffix.lower()
+    if suffix == ".csv":
+        df.to_csv(p, index=False)
+        return
+    if suffix in {".xlsx", ".xls"}:
+        target = sheet_name
+        other_sheets: dict[str, pd.DataFrame] = {}
+        if p.exists():
+            try:
+                book = pd.read_excel(p, sheet_name=None, engine="openpyxl")
+            except Exception:  # noqa: BLE001
+                book = {}
+            if isinstance(book, dict) and book:
+                if not target:
+                    target = next(iter(book.keys()))
+                for name, frame in book.items():
+                    if name != target:
+                        other_sheets[name] = frame
+        if not target:
+            target = "Sheet1"
+        with pd.ExcelWriter(p, engine="openpyxl") as writer:
+            for name, frame in other_sheets.items():
+                frame.to_excel(writer, sheet_name=str(name)[:31], index=False)
+            df.to_excel(writer, sheet_name=str(target)[:31], index=False)
+        return
+    raise ValueError("Unsupported file type")
 
 
 def pre_safe_fill_backup_path(path) -> Any:

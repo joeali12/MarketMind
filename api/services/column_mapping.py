@@ -457,18 +457,23 @@ def parse_canonical_types(
     out["quantity"] = pd.to_numeric(out.get("quantity"), errors="coerce")
     out["unit_price"] = pd.to_numeric(out.get("unit_price"), errors="coerce")
     mapped_line = pd.to_numeric(out.get("line_amount"), errors="coerce") if "line_amount" in out.columns else None
-    # customer_id: keep as string-capable numeric where possible
+    # customer_id: preserve losslessly — numeric only when every non-empty value parses
     cid_raw = out.get("customer_id")
     if cid_raw is not None:
-        as_num = pd.to_numeric(cid_raw, errors="coerce")
-        # If mostly non-numeric IDs, keep string codes in a parallel-friendly float NaN + string store
-        if as_num.notna().sum() >= max(1, int(0.5 * cid_raw.notna().sum())):
+        as_str = cid_raw.astype("string").str.strip()
+        blank = (
+            as_str.isna()
+            | (as_str == "")
+            | as_str.str.lower().isin(["nan", "none", "<na>"])
+        )
+        as_num = pd.to_numeric(as_str.where(~blank), errors="coerce")
+        non_empty = ~blank
+        if non_empty.any() and bool(as_num[non_empty].notna().all()):
             out["customer_id"] = as_num
         else:
-            # Hash-free: store categorical codes as nullable string; analytics use dropna nunique on string
-            out["customer_id"] = cid_raw.astype("string")
+            out["customer_id"] = as_str.where(non_empty, pd.NA)
     else:
-        out["customer_id"] = pd.Series([pd.NA] * n)
+        out["customer_id"] = pd.Series([pd.NA] * n, dtype="string")
     out["country"] = _as_str("country")
     if "category" in out.columns:
         out["category"] = _as_str("category")
