@@ -428,7 +428,7 @@ def build_proposals(
 
     from api.services.gap_fill import suggest_for_parsed
 
-    gap = suggest_for_parsed(parsed, limit=25)
+    gap = suggest_for_parsed(parsed, limit=25, date_format=date_format)
     unresolved_preview = gap["rows"]
 
     return {

@@ -42,6 +42,15 @@ const EDIT_FIELDS = [
   "description",
 ] as const;
 
+/** Gaps table: calendar date only — never show Timestamp midnight clocks. */
+function formatGapDate(value: string | null | undefined): string {
+  if (value == null || value === "") return "—";
+  const trimmed = String(value).trim();
+  const m = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (m) return m[1];
+  return trimmed.replace(/\s+\d{1,2}:\d{2}(:\d{2})?(\.\d+)?$/, "").trim() || trimmed;
+}
+
 export function UnresolvedGapsPanel({
   sessionId,
   rows,
@@ -64,7 +73,10 @@ export function UnresolvedGapsPanel({
       for (const field of EDIT_FIELDS) {
         const key = `${r.row_index}:${field}`;
         const cur = r[field];
-        if (cur != null) next[key] = String(cur);
+        if (cur == null) continue;
+        // Dates: calendar-only seed — never stash ``… 00:00:00`` into save drafts.
+        next[key] =
+          field === "invoice_date" ? formatGapDate(String(cur)) : String(cur);
       }
     }
     setDrafts((prev) => ({ ...next, ...prev }));
@@ -421,7 +433,10 @@ export function UnresolvedGapsPanel({
                     {canEdit && issues.has("invoice_date") ? (
                       <input
                         className="input gap-input"
-                        value={drafts[`${r.row_index}:invoice_date`] ?? ""}
+                        value={
+                          drafts[`${r.row_index}:invoice_date`] ??
+                          (r.invoice_date ? formatGapDate(r.invoice_date) : "")
+                        }
                         onChange={(e) =>
                           setCell(r.row_index, "invoice_date", e.target.value)
                         }
@@ -433,7 +448,7 @@ export function UnresolvedGapsPanel({
                         }
                       />
                     ) : (
-                      r.invoice_date ?? "—"
+                      formatGapDate(r.invoice_date)
                     )}
                   </td>
                   <td>

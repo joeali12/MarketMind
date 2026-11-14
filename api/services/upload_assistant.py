@@ -582,9 +582,32 @@ def _is_session_transform_turn(question: str, meta: UploadSessionMeta | None) ->
     if meta is None:
         return False
     from api.services import data_transforms as _dx
+    from api.services import plan_intent, session_mutate
 
+    if getattr(meta, "pending_transform", None) and (question or "").strip().lower() in {
+        "apply",
+        "do it",
+        "confirm",
+        "yes",
+        "ok",
+        "طبّق",
+        "طبق",
+        "نفّذ",
+        "نفذ",
+        "موافق",
+        "أيوه",
+        "ايوه",
+        "تمام",
+    }:
+        return True
+    # Soft bilingual reshape cues → route to LLM/tool transform path (not analytics Q&A).
+    if plan_intent.soft_reshape_cue(question) or session_mutate.looks_like_mutation(question):
+        return True
     parsed = _dx.parse_transform_intent(
-        question, pending=getattr(meta, "pending_transform", None), meta=meta
+        question,
+        pending=getattr(meta, "pending_transform", None),
+        meta=meta,
+        allow_llm=False,
     )
     # Refuse messages still count as a transform turn (do not fall through to cleaning).
     return bool(parsed)
@@ -633,7 +656,9 @@ def _transform_turn_result(
         "session_id": profile.get("session_id") or (meta.session_id if meta else None),
         "demo": False,
         "raw_rows_sent_externally": False,
-        "raw_user_question_sent_externally": False,
+        "raw_user_question_sent_externally": bool(
+            open_result.get("raw_user_question_sent_externally")
+        ),
         "fallback_used": bool(open_result.get("fallback_used")),
         "privacy_disclosure_en": (
             "When AI assist is on, your question may be sent to Google’s Gemini API "
@@ -674,11 +699,24 @@ def _open_ended_analytics_turn(
         # Still honor safe transform commands locally (no Gemini / no raw rows out).
         from api.services import data_transforms as _dx
 
-        if meta is not None and _dx.parse_transform_intent(
-            question, pending=getattr(meta, "pending_transform", None), meta=meta
-        ):
+        parsed = (
+            _dx.parse_transform_intent(
+                question,
+                pending=getattr(meta, "pending_transform", None),
+                meta=meta,
+                lang=lang,
+                allow_llm=False,
+            )
+            if meta is not None
+            else None
+        )
+        if parsed:
             grounded = gemini_tool_loop.grounded_tool_answer(
-                question=question, lang=lang, meta=meta
+                question=question,
+                lang=lang,
+                meta=meta,
+                parsed_intent=parsed,
+                allow_llm=False,
             )
             answer = grounded.get("answer") or ""
             return {
@@ -740,17 +778,31 @@ def _open_ended_analytics_turn(
         grounded["raw_user_question_sent_externally"] = False
         return grounded
 
-    # Deterministic session transforms take priority over Gemini so clear
-    # commands (strip time, add invoice flag, …) never get refused/clarified away.
+    # Session transforms take priority over open Q&A so reshape asks never
+    # fall through to generic upload stats. Compile once, then execute.
     from api.services import data_transforms as _dx
 
-    if meta is not None and _dx.parse_transform_intent(
-        question, pending=getattr(meta, "pending_transform", None), meta=meta
-    ):
+    parsed = (
+        _dx.parse_transform_intent(
+            question,
+            pending=getattr(meta, "pending_transform", None),
+            meta=meta,
+            lang=lang,
+            allow_llm=True,
+        )
+        if meta is not None
+        else None
+    )
+    if parsed:
         grounded = gemini_tool_loop.grounded_tool_answer(
-            question=question, lang=lang, meta=meta
+            question=question,
+            lang=lang,
+            meta=meta,
+            parsed_intent=parsed,
+            allow_llm=False,
         )
         answer = grounded.get("answer") or ""
+        sent_externally = bool(parsed.get("compiled_via_llm"))
         return {
             "answer_en": answer,
             "answer_ar": answer,
@@ -775,7 +827,7 @@ def _open_ended_analytics_turn(
                 if grounded.get("mutated")
                 else []
             ),
-            "raw_user_question_sent_externally": False,
+            "raw_user_question_sent_externally": sent_externally,
         }
 
     loop = gemini_tool_loop.run_tool_assisted_turn(
@@ -805,16 +857,23 @@ def _open_ended_analytics_turn(
             "actions": (
                 [{"type": "refresh_after_mutation"}] if loop.mutated else []
             ),
+            "raw_user_question_sent_externally": True,
         }
 
+    # Tool loop already tried Gemini with the user question when a key is set;
+    # do not compile again via LLM on the grounded fallback.
     grounded = gemini_tool_loop.grounded_tool_answer(
-        question=question, lang=lang, meta=meta
+        question=question, lang=lang, meta=meta, allow_llm=False
     )
     answer = grounded.get("answer") or (
         "I couldn’t complete AI assist; here are computed facts from your upload."
         if not ar
         else "المساعدة الذكية متاحتش؛ دي حقائق محسوبة من ملفك."
     )
+    sent_externally = loop.error_code not in {
+        "missing_key",
+        "sdk_missing",
+    } or bool(grounded.get("compiled_via_llm"))
     return {
         "answer_en": answer if not ar else answer,
         "answer_ar": answer if ar else answer,
@@ -840,6 +899,7 @@ def _open_ended_analytics_turn(
         "actions": (
             [{"type": "refresh_after_mutation"}] if grounded.get("mutated") else []
         ),
+        "raw_user_question_sent_externally": bool(sent_externally),
     }
 
 
@@ -936,11 +996,33 @@ def answer(
         quick = ["yes correct" if not ar else "صح كده", "not correct" if not ar else "مش صح"]
         actions.append({"type": "await", "field": "profile_confirm"})
 
-    # --- Confirm file summary ---
-    elif re.search(
-        r"\byes\b|correct|صح|أيوه|ايوه|تمام كده|صح كده|yes correct|looks good|موافق",
-        q_low,
-    ) and not profile.get("profile_confirmed"):
+    # --- Confirm file summary (pending transform apply wins over profile yes) ---
+    elif (
+        re.search(
+            r"\byes\b|correct|صح|أيوه|ايوه|تمام كده|صح كده|yes correct|looks good|موافق",
+            q_low,
+        )
+        and not profile.get("profile_confirmed")
+        and not (
+            getattr(meta, "pending_transform", None)
+            and (q or "").strip().lower()
+            in {
+                "yes",
+                "ok",
+                "موافق",
+                "أيوه",
+                "ايوه",
+                "تمام",
+                "apply",
+                "do it",
+                "confirm",
+                "طبّق",
+                "طبق",
+                "نفّذ",
+                "نفذ",
+            }
+        )
+    ):
         actions.append({"type": "confirm_profile", "confirmed": True})
         unresolved_n = len((proposals or {}).get("unresolved_preview") or [])
         if unresolved_n == 0:

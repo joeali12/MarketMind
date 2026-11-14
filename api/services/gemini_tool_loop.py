@@ -30,13 +30,18 @@ Answer in the user's language (Egyptian-friendly Arabic if lang=ar, else concise
 
 You may call approved analytics tools to fetch server-computed facts for THIS upload only.
 You may reshape the temporary upload session file with preview_data_transform / apply_data_transform.
+Understand natural Arabic AND English — do not require exact stock phrases.
 Prefer op="plan" with steps for any reasonable in-file command (filter, sort, assign new columns
 from constrained expressions, replace, split/merge, floor dates, strip time, fillna, cast,
 rename, drop non-critical cols, parse_currency, groupby_agg, dedupe, clip).
 Expressions may use column names and + - * / comparisons and whitelisted helpers only —
 never arbitrary Python, shell, network, demo data, or model training.
-Workflow: preview first; apply_data_transform with confirm_apply=true only when the user
-clearly asked to apply (طبّق / apply / do it / imperative reshape).
+When they ask to remove clock/time/hours from dates (شيل الوقت، شيل الساعة، بالساعات،
+remove the time, strip hours, date only, …) call apply_data_transform with
+op="strip_time" (or plan step strip_time) and confirm_apply=true — that is an imperative edit.
+For non-imperative “show me / preview” wording, preview_data_transform first.
+apply_data_transform with confirm_apply=true when the user clearly asked to apply
+(طبّق / apply / do it / imperative reshape).
 Refuse only truly out-of-scope asks; otherwise execute within this file.
 Never invent numbers, product names, forecasts, or causes. Use only tool results for file-specific claims.
 If a request is ambiguous, ask one short clarifying question.
@@ -48,6 +53,7 @@ Brand yourself as MarketMind / مساعد MarketMind.
 For fill requests: preview first via get_missing_and_fill_preview; only call apply_safe_fills
 with confirm_apply=true when the user clearly asked to apply/fill safe values.
 Never invent customer IDs, invoices, dates, or transaction quantities.
+Never answer a file-edit request with a generic upload summary.
 """
 
 
@@ -263,15 +269,22 @@ def grounded_tool_answer(
     question: str,
     lang: str,
     meta: UploadSessionMeta,
+    parsed_intent: dict[str, Any] | None = None,
+    allow_llm: bool = True,
 ) -> dict[str, Any]:
     """Deterministic multi-tool fallback when Gemini is unavailable.
 
     Heuristically selects tools from the question and composes a grounded reply.
+    Pass ``parsed_intent`` when the caller already compiled the transform once
+    (avoids a second LLM plan call). Set ``allow_llm=False`` on privacy-blocked paths.
     """
     q = (question or "").lower()
     ar = lang == "ar"
     called: list[str] = []
     parts: list[str] = []
+    compiled_via_llm = bool(
+        parsed_intent and parsed_intent.get("compiled_via_llm")
+    )
 
     def use(name: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
         called.append(name)
@@ -348,9 +361,17 @@ def grounded_tool_answer(
     # Allowlisted session-file transforms (date strip, invoice flags, …)
     from api.services import data_transforms as _dx
 
-    parsed = _dx.parse_transform_intent(
-        question, pending=getattr(meta, "pending_transform", None), meta=meta
-    )
+    parsed = parsed_intent
+    if parsed is None:
+        parsed = _dx.parse_transform_intent(
+            question,
+            pending=getattr(meta, "pending_transform", None),
+            meta=meta,
+            lang=lang,
+            allow_llm=allow_llm,
+        )
+        if parsed and parsed.get("compiled_via_llm"):
+            compiled_via_llm = True
     if parsed and parsed.get("op") == "refuse":
         parts.append(
             parsed.get("message_ar") if ar else parsed.get("message_en") or ""
@@ -362,7 +383,14 @@ def grounded_tool_answer(
         args = {
             k: v
             for k, v in parsed.items()
-            if k not in {"confirm_apply", "error_code", "message_en", "message_ar"}
+            if k
+            not in {
+                "confirm_apply",
+                "error_code",
+                "message_en",
+                "message_ar",
+                "compiled_via_llm",
+            }
             and v is not None
         }
         if parsed.get("confirm_apply"):
@@ -416,19 +444,32 @@ def grounded_tool_answer(
             )
 
     if not parts:
-        r = use("get_upload_profile")
-        if r.get("ok"):
+        from api.services import plan_intent
+
+        if plan_intent.soft_reshape_cue(question):
             parts.append(
-                f"الرفع الحالي: حوالي {_fmt(r.get('row_count'))} صف، "
-                f"{_fmt(r.get('unique_customers'))} زبون، {_fmt(r.get('unique_products'))} منتج. "
-                "اسأل عن المبيعات، المنتجات، المقارنة، التنظيف، أو التوقع."
+                "فهمت إنك عايز تعدّل الملف، بس الأمر مش واضح كفاية. "
+                "مثال: «شيل الوقت من التاريخ» أو «رتب حسب InvoiceDate» أو «ضيف عمود …». "
+                "ولو فيه معاينة جاهزة، رد بـ «طبّق»."
                 if ar
-                else f"Current upload: ~{_fmt(r.get('row_count'))} rows, "
-                f"{_fmt(r.get('unique_customers'))} customers, {_fmt(r.get('unique_products'))} products. "
-                "Ask about sales, products, comparisons, cleaning, or forecast."
+                else "I understood you want to edit the file, but the command isn’t clear enough. "
+                "Examples: “strip time from dates”, “sort by InvoiceDate”, or “add column …”. "
+                "If a preview is ready, reply “apply”."
             )
         else:
-            parts.append(r.get("message_ar") if ar else r.get("message_en") or "")
+            r = use("get_upload_profile")
+            if r.get("ok"):
+                parts.append(
+                    f"الرفع الحالي: حوالي {_fmt(r.get('row_count'))} صف، "
+                    f"{_fmt(r.get('unique_customers'))} زبون، {_fmt(r.get('unique_products'))} منتج. "
+                    "اسأل عن المبيعات، المنتجات، المقارنة، التنظيف، أو التوقع."
+                    if ar
+                    else f"Current upload: ~{_fmt(r.get('row_count'))} rows, "
+                    f"{_fmt(r.get('unique_customers'))} customers, {_fmt(r.get('unique_products'))} products. "
+                    "Ask about sales, products, comparisons, cleaning, or forecast."
+                )
+            else:
+                parts.append(r.get("message_ar") if ar else r.get("message_en") or "")
 
     answer = "\n".join(p for p in parts if p).strip()
     mutated = (
@@ -459,6 +500,7 @@ def grounded_tool_answer(
         "tools_called": called,
         "mode": "grounded_facts",
         "mutated": bool(mutated),
+        "compiled_via_llm": bool(compiled_via_llm),
     }
 
 

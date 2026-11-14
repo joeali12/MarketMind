@@ -137,23 +137,63 @@ def _datetime_candidates(df: pd.DataFrame, mapping: dict[str, str] | None) -> li
     return cols
 
 
+_CLOCK_RE = re.compile(r"\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?")
+
+
+def _value_str(value: object) -> str:
+    """Human string form — keeps Timestamp midnight as ``… 00:00:00`` (unlike astype)."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(value)
+
+
 def _has_time_component(series: pd.Series) -> tuple[bool, int]:
-    """Return (any_time_present, count_with_time)."""
-    parsed = pd.to_datetime(series, errors="coerce", format="mixed")
-    valid = parsed.dropna()
-    if valid.empty:
-        # string clock patterns
-        as_str = series.astype(str)
-        hit = as_str.str.contains(r"\d{1,2}:\d{2}", regex=True, na=False)
-        return bool(hit.any()), int(hit.sum())
-    with_time = (valid.dt.hour != 0) | (valid.dt.minute != 0) | (valid.dt.second != 0)
-    # also count string times even when midnight
-    as_str = series.astype(str)
-    clock = as_str.str.contains(r"\d{1,2}:\d{2}", regex=True, na=False)
-    count = int(with_time.sum()) + int((clock & parsed.isna()).sum())
-    # If strings contain clock, count those too even when time is 00:00
-    count = max(count, int(clock.sum()))
+    """Return (any_time_present, count_with_time).
+
+    Only clock substrings count (incl. midnight ``00:00:00`` via ``str(Timestamp)``).
+    Date-only values like ``04/05/2024`` or ``2024-05-04`` do not.
+    """
+    as_str = series.map(_value_str)
+    clock = as_str.str.contains(_CLOCK_RE.pattern, regex=True, na=False)
+    count = int(clock.sum())
     return count > 0, count
+
+
+def format_date_only(value: object, date_format: str | None = None) -> str | None:
+    """Serialize a date/datetime for UI as YYYY-MM-DD (never ``… 00:00:00``).
+
+    Honors session ``date_format`` (dayfirst/monthfirst/iso). Unconfirmed slash
+    dates are left as calendar text after stripping any clock — never month-first
+    reinterpreted into a swapped YYYY-MM-DD.
+    """
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        return None
+    # Already a calendar/datetime object — formatting cannot swap day/month.
+    if isinstance(value, pd.Timestamp):
+        return value.strftime("%Y-%m-%d")
+    if hasattr(value, "strftime") and not isinstance(value, str):
+        try:
+            return pd.Timestamp(value).strftime("%Y-%m-%d")
+        except (TypeError, ValueError, OverflowError):
+            pass
+    text = _value_str(value).strip()
+    if not text or text.lower() in {"nat", "none", "nan"}:
+        return None
+    parsed = _parse_datetimes(pd.Series([value]), date_format).iloc[0]
+    if pd.notna(parsed):
+        return pd.Timestamp(parsed).strftime("%Y-%m-%d")
+    # Ambiguous / unparsed: strip clock only; do not invent an ISO order.
+    return _CLOCK_RE.sub("", text).strip() or text
 
 
 def preview_or_apply(
@@ -190,10 +230,22 @@ def preview_or_apply(
 
     mapping = dict(meta.column_mapping or {})
 
+    def _steps_with_date_format(raw_steps: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+        fmt = (getattr(meta, "date_format", None) or "").strip().lower()
+        out_steps: list[dict[str, Any]] = []
+        for step in raw_steps or []:
+            if not isinstance(step, dict):
+                continue
+            item = dict(step)
+            if item.get("op") == "strip_time" and fmt and not item.get("date_format"):
+                item["date_format"] = fmt
+            out_steps.append(item)
+        return out_steps
+
     if op == "plan":
         from api.services import session_mutate
 
-        steps = plan or []
+        steps = _steps_with_date_format(plan)
         result = session_mutate.execute_steps(
             df, steps, mapping=mapping, protected_drop=_PROTECTED_DROP
         )
@@ -261,7 +313,7 @@ def preview_or_apply(
             "threshold": result.get("threshold", threshold),
             "fill_value": fill_value,
             "rename_to": result.get("rename_to") or rename_to,
-            "plan": plan if op == "plan" else None,
+            "plan": (_steps_with_date_format(plan) if op == "plan" else None),
         }
         upload_store.save_meta(meta)
         # Drop heavy frame from preview response
@@ -273,7 +325,10 @@ def preview_or_apply(
         from api.services import session_mutate
 
         applied = session_mutate.execute_steps(
-            df, plan or [], mapping=mapping, protected_drop=_PROTECTED_DROP
+            df,
+            _steps_with_date_format(plan),
+            mapping=mapping,
+            protected_drop=_PROTECTED_DROP,
         )
     else:
         handler = {
@@ -356,7 +411,9 @@ def _op_strip_time(
             has, count = _has_time_component(df[c])
             if has and count >= best_count:
                 best, best_count = c, count
-        target = best
+        # Prefer a timed column; otherwise keep the mapped/date candidate so we
+        # can say “already date-only” instead of “no datetime column”.
+        target = best or (candidates[0] if candidates else None)
     if not target or target not in df.columns:
         return {
             "ok": False,
@@ -367,36 +424,41 @@ def _op_strip_time(
 
     has, count = _has_time_component(df[target])
     if not has:
+        # Never claim “no time” when any cell string still shows a clock (incl. 00:00:00).
+        sample = ", ".join(
+            _value_str(v) for v in df[target].dropna().head(3).tolist()
+        ) or "(empty)"
         return {
             "ok": False,
             "error_code": "no_time_component",
-            "message_en": f"Column {target!r} already looks date-only.",
-            "message_ar": f"العمود {target} أصلاً تاريخ من غير وقت.",
+            "message_en": (
+                f"Column {target!r} already looks date-only "
+                f"(no HH:MM / 00:00:00 in values; e.g. {sample})."
+            ),
+            "message_ar": (
+                f"العمود {target} باين تاريخ بس من غير ساعة "
+                f"(مفيش HH:MM أو 00:00:00 في القيم؛ مثال: {sample})."
+            ),
             "column": target,
         }
 
     out = df.copy()
-    date_fmt = getattr(meta, "date_format", None)
-    parsed = _parse_datetimes(out[target], date_fmt)
-    # Confirmed format → ISO date. Unconfirmed → strip clock text only (preserve day/month order).
-    if (date_fmt or "").strip().lower() in {"dayfirst", "monthfirst", "iso"}:
-        date_only = parsed.dt.strftime("%Y-%m-%d")
-        unparsed = parsed.isna() & out[target].notna()
-        if unparsed.any():
-            stripped = (
-                out.loc[unparsed, target]
-                .astype(str)
-                .str.replace(r"\s+\d{1,2}:\d{2}(:\d{2})?(\.\d+)?", "", regex=True)
-            )
-            date_only = date_only.astype("string")
-            date_only.loc[unparsed] = stripped
-        out[target] = date_only.where(date_only.notna(), out[target])
-    else:
-        out[target] = (
-            out[target]
-            .astype(str)
-            .str.replace(r"\s+\d{1,2}:\d{2}(:\d{2})?(\.\d+)?", "", regex=True)
+    parsed = _parse_datetimes(out[target], getattr(meta, "date_format", None))
+    # Always persist calendar date strings — never leave Timestamp midnight
+    # (UI would show ``2025-03-13 00:00:00`` again).
+    date_only = parsed.dt.strftime("%Y-%m-%d")
+    unparsed = parsed.isna() & out[target].notna()
+    if unparsed.any():
+        stripped = (
+            out.loc[unparsed, target]
+            .map(_value_str)
+            .str.replace(_CLOCK_RE.pattern, "", regex=True)
+            .str.strip()
         )
+        date_only = date_only.astype("string")
+        date_only.loc[unparsed] = stripped
+    # Keep original only when both parse and strip failed.
+    out[target] = date_only.where(date_only.notna() & (date_only != ""), out[target])
 
     preview = {
         "ok": True,
@@ -771,9 +833,15 @@ def parse_transform_intent(
     pending: dict[str, Any] | None = None,
     columns: list[str] | None = None,
     meta: UploadSessionMeta | None = None,
+    lang: str = "en",
+    allow_llm: bool = True,
 ) -> dict[str, Any] | None:
-    """Compile AR/EN question into a session transform (legacy op or general plan)."""
-    from api.services import session_mutate
+    """Compile AR/EN question into a session transform (legacy op or general plan).
+
+    Prefers Gemini → allowlisted mutate DSL when configured and the ask looks like
+    a file reshape; falls back to deterministic compile_plan.
+    """
+    from api.services import plan_intent, session_mutate
 
     q = (question or "").strip()
     if not q:
@@ -786,9 +854,39 @@ def parse_transform_intent(
         except Exception:  # noqa: BLE001
             cols = list((meta.column_mapping or {}).values())
 
+    # Bare «طبّق» / apply against a pending preview — no LLM needed.
+    bare = {
+        "apply",
+        "do it",
+        "confirm",
+        "yes",
+        "ok",
+        "طبّق",
+        "طبق",
+        "نفّذ",
+        "نفذ",
+        "موافق",
+        "أيوه",
+        "ايوه",
+        "تمام",
+    }
+    if pending and q.lower() in bare:
+        out = dict(pending)
+        out["confirm_apply"] = True
+        return out
+
+    # Deterministic compile first (fast, offline). LLM fills gaps for spoken
+    # AR/EN that the heuristic misses. Privacy-blocked callers pass allow_llm=False.
     planned = session_mutate.compile_plan(q, columns=cols, pending=pending)
-    if planned is None:
-        return None
-    if planned.get("op") == "refuse":
+    if planned is not None:
+        if planned.get("op") == "refuse":
+            return planned
         return planned
-    return planned
+
+    if allow_llm and plan_intent.soft_reshape_cue(q):
+        llm_plan = plan_intent.llm_compile_plan(q, columns=cols, lang=lang)
+        if llm_plan is not None:
+            llm_plan = dict(llm_plan)
+            llm_plan["compiled_via_llm"] = True
+            return llm_plan
+    return None

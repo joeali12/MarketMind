@@ -435,21 +435,41 @@ def _run_step(
         if not col:
             raise SafeExprError("strip_time: no date column")
         out = df.copy()
-        out[col] = (
-            out[col]
-            .astype(str)
-            .str.replace(r"\s+\d{1,2}:\d{2}(:\d{2})?(\.\d+)?", "", regex=True)
-        )
+        # Strip clock text only — do NOT re-parse with format="mixed" (would
+        # swap DMY ↔ MDY). Session-confirmed dayfirst lives in legacy strip_time.
+        date_fmt = str(step.get("date_format") or "").strip().lower()
+        if date_fmt in {"dayfirst", "monthfirst", "iso"}:
+            from api.services.data_transforms import _parse_datetimes
+
+            parsed = _parse_datetimes(out[col], date_fmt)
+            date_only = parsed.dt.strftime("%Y-%m-%d")
+            unparsed = parsed.isna() & out[col].notna()
+            if unparsed.any():
+                stripped = (
+                    out.loc[unparsed, col]
+                    .map(lambda v: "" if pd.isna(v) else str(v))
+                    .str.replace(r"\s*\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?", "", regex=True)
+                    .str.strip()
+                )
+                date_only = date_only.astype("string")
+                date_only.loc[unparsed] = stripped
+            out[col] = date_only.where(date_only.notna() & (date_only != ""), out[col])
+        else:
+            out[col] = (
+                out[col]
+                .map(lambda v: "" if pd.isna(v) else str(v))
+                .str.replace(r"\s*\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?", "", regex=True)
+                .str.strip()
+            )
         return out, f"strip_time on {col}"
 
     if op == "fillna":
         col = resolve_column(df, step.get("column"))
         if not col:
             raise SafeExprError("fillna: column not found")
-        # Refuse inventing IDs
+        # Refuse inventing IDs — value fill AND ffill/bfill (propagation invents too).
         if any(k in _norm(col) for k in ("customer", "invoice", "email", "phone", "زبون", "فاتور")):
-            if step.get("value") not in (None, "", 0, "0"):
-                raise SafeExprError("Cannot invent values for identity-like columns")
+            raise SafeExprError("Cannot invent values for identity-like columns")
         out = df.copy()
         method = str(step.get("method") or "").lower()
         if method == "ffill":
@@ -553,6 +573,93 @@ def _run_step(
     raise SafeExprError(f"Unhandled op {op}")
 
 
+_STRIP_TIME_PHRASES = (
+    "شيل الساعة",
+    "شيل الساعات",
+    "شيل الوقت",
+    "امسح الساعة",
+    "امسح الساعات",
+    "امسح الوقت",
+    "من غير وقت",
+    "من غير الساعة",
+    "بدون وقت",
+    "بدون الساعة",
+    "الوقت بالساعات",
+    "بالساعات",
+    "تاريخ فقط",
+    "00:00:00",
+    "strip time",
+    "strip hours",
+    "strip the time",
+    "strip the hours",
+    "remove time",
+    "remove hours",
+    "remove the time",
+    "remove the hours",
+    "without time",
+    "without the time",
+    "date only",
+    "dates only",
+    "time of day",
+)
+
+
+def _mentions_midnight_clock(q_low: str) -> bool:
+    """True only for literal midnight ``00:00:00`` — not ``10:00:00`` / ``00:00`` substrings."""
+    return "00:00:00" in q_low
+
+
+def _wants_strip_time(q: str, q_low: str) -> bool:
+    if any(p in q or p in q_low for p in _STRIP_TIME_PHRASES):
+        return True
+    if _mentions_midnight_clock(q_low):
+        return True
+    # Loose EN: "strip/remove … time/hours" with words in between.
+    if re.search(
+        r"(?i)\b(strip|remove|drop|clear)\b.{0,24}\b(time|hours?|timestamp)\b",
+        q_low,
+    ):
+        return True
+    # Loose AR: شيل/امسح … وقت/ساعة
+    if re.search(r"(شيل|امسح|احذف).{0,20}(وقت|ساعة|الساعات)", q):
+        return True
+    return False
+
+
+def _strip_time_is_imperative(q: str, q_low: str) -> bool:
+    """Imperative strip-time commands apply immediately (no extra «طبّق»)."""
+    if any(
+        p in q or p in q_low
+        for p in (
+            "شيل الساعة",
+            "شيل الساعات",
+            "شيل الوقت",
+            "امسح الساعة",
+            "امسح الساعات",
+            "امسح الوقت",
+            "strip time",
+            "strip hours",
+            "strip the time",
+            "remove time",
+            "remove hours",
+            "remove the time",
+        )
+    ):
+        return True
+    if _mentions_midnight_clock(q_low) and re.search(
+        r"(شيل|امسح|احذف|strip|remove)", q_low if "strip" in q_low or "remove" in q_low else q
+    ):
+        return True
+    if re.search(
+        r"(?i)\b(strip|remove)\b.{0,24}\b(time|hours?)\b",
+        q_low,
+    ):
+        return True
+    if re.search(r"(شيل|امسح).{0,24}(وقت|ساعة|الساعات)", q):
+        return True
+    return False
+
+
 def looks_like_mutation(question: str) -> bool:
     """True when the user is asking to reshape the file (not analytics Q&A)."""
     q = question or ""
@@ -563,6 +670,8 @@ def looks_like_mutation(question: str) -> bool:
         q,
     ):
         return False
+    if _wants_strip_time(q, q_low):
+        return True
     cues = (
         "filter ",
         "sort by",
@@ -583,8 +692,6 @@ def looks_like_mutation(question: str) -> bool:
         "drop column",
         "add column",
         "new column",
-        "strip time",
-        "remove time",
         "keep only",
         "delete rows",
         "رتب حسب",
@@ -597,7 +704,6 @@ def looks_like_mutation(question: str) -> bool:
         "أضف عمود",
         "عمود جديد",
         "أول الشهر",
-        "شيل الساعة",
         "امسح عمود",
         "احذف عمود",
         "شيل المكرر",
@@ -668,25 +774,15 @@ def compile_plan(
     steps: list[dict[str, Any]] = []
 
     # Meta-aware legacy ops (date_format, blank-invoice pooling rules, …)
-    if any(
-        k in q or k in q_low
-        for k in (
-            "شيل الساعة",
-            "امسح الساعة",
-            "strip time",
-            "remove time",
-            "without time",
-            "date only",
-            "من غير وقت",
-            "تاريخ فقط",
-            "time of day",
-        )
-    ) and any(k in q or k in q_low for k in ("تاريخ", "date", "timestamp", "datetime")):
+    # Match spoken AR/EN: «شيل الوقت بالساعات», «remove the time», «strip hours»…
+    if _wants_strip_time(q, q_low) and (
+        any(k in q or k in q_low for k in ("تاريخ", "date", "timestamp", "datetime", "عمود"))
+        or _mentions_midnight_clock(q_low)
+    ):
         return {
             "op": "strip_time",
             "column": col_named("InvoiceDate", "date", "تاريخ"),
-            "confirm_apply": wants_apply
-            or any(w in q or w in q_low for w in ("شيل الساعة", "امسح الساعة", "strip time", "remove time")),
+            "confirm_apply": wants_apply or _strip_time_is_imperative(q, q_low),
         }
 
     if (
@@ -922,14 +1018,12 @@ def compile_plan(
         "op": "plan",
         "plan": cleaned,
         "confirm_apply": wants_apply
+        or _strip_time_is_imperative(q, q_low)
         or any(
             w in q
             for w in (
-                "شيل الساعة",
-                "امسح الساعة",
                 "ضيف عمود",
                 "أضف عمود",
-                "strip time",
                 "add column",
                 "add a column",
             )

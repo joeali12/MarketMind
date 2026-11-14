@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -170,6 +171,142 @@ def test_parse_transform_intent_english():
     )
     assert flag and flag["op"] == "add_invoice_flag"
     assert flag["threshold"] == 1000.0
+
+
+def test_parse_strip_time_spoken_arabic_and_english():
+    """Spoken AR/EN strip-time must compile even without LLM (heuristic fallback)."""
+    from api.services import data_transforms as dx
+
+    cols = ["Invoice", "Quantity", "Price", "InvoiceDate"]
+    cases = [
+        "شيل الوقت بالساعات في التاريخ",
+        "في عمود التاريخ شيل الوقت اللي هو بالساعات",
+        "امسح الوقت من التاريخ",
+        "strip hours from the date",
+        "remove the time from dates",
+        "Please remove the hours from the InvoiceDate column",
+    ]
+    for phrase in cases:
+        parsed = dx.parse_transform_intent(phrase, columns=cols, allow_llm=False)
+        assert parsed and parsed["op"] == "strip_time", phrase
+        assert parsed.get("confirm_apply") is True, phrase
+
+
+def test_llm_compile_plan_sanitizes_strip_time(monkeypatch):
+    from api.services import plan_intent
+
+    monkeypatch.setattr(plan_intent, "gemini_key_configured", lambda: True)
+
+    def fake_llm(question, *, columns=None, lang="en"):
+        return plan_intent._sanitize_plan(
+            {
+                "op": "strip_time",
+                "column": "InvoiceDate",
+                "confirm_apply": True,
+            },
+            columns=list(columns or []),
+        )
+
+    monkeypatch.setattr(plan_intent, "llm_compile_plan", fake_llm)
+    from api.services import data_transforms as dx
+
+    cols = ["Invoice", "Quantity", "Price", "InvoiceDate"]
+    # Force LLM path by using a soft cue that heuristic may miss without allow_llm=False
+    parsed = dx.parse_transform_intent(
+        "خلّي التاريخ من غير الساعات لو سمحت",
+        columns=cols,
+        lang="ar",
+        allow_llm=True,
+    )
+    assert parsed and parsed["op"] == "strip_time"
+    assert parsed.get("confirm_apply") is True
+
+
+def test_soft_reshape_cue_covers_user_screenshot_phrasing():
+    from api.services import plan_intent
+
+    assert plan_intent.soft_reshape_cue("شيل الوقت بالساعات في التاريخ")
+    assert plan_intent.soft_reshape_cue("remove the time from dates")
+    assert plan_intent.soft_reshape_cue("شيل الـ 00:00:00 من التاريخ")
+    assert not plan_intent.soft_reshape_cue("قارن مبيعات الشهر ده باللي قبله")
+    # Bare confirms must not steal cleaning / casual ok turns.
+    assert not plan_intent.soft_reshape_cue("طبّق")
+    assert not plan_intent.soft_reshape_cue("ok")
+    assert not plan_intent.soft_reshape_cue("تمام")
+
+
+def test_midnight_datetime_counts_as_time_to_strip():
+    """UI shows str(Timestamp)='… 00:00:00'; never claim date-only / leave clocks."""
+    import pandas as pd
+
+    from api.services import data_transforms as dx
+
+    s = pd.to_datetime(pd.Series(["2025-03-13 00:00:00", "2025-04-06 00:00:00"]))
+    has, count = dx._has_time_component(s)
+    assert has is True
+    assert count == 2
+    assert dx.format_date_only(s.iloc[0]) == "2025-03-13"
+
+
+def test_date_only_slash_dates_do_not_count_as_time():
+    import pandas as pd
+
+    from api.services import data_transforms as dx
+    from api.services import session_mutate as sm
+
+    s = pd.Series(["04/05/2024", "13/05/2024", "2024-05-04"])
+    has, count = dx._has_time_component(s)
+    assert has is False
+    assert count == 0
+    # ``10:00:00`` must not trigger midnight strip / auto-apply.
+    assert not sm._mentions_midnight_clock("why is 10:00:00 showing?")
+    assert sm._mentions_midnight_clock("شيل الـ 00:00:00 من التاريخ")
+    parsed = sm.compile_plan("what does 10:00:00 mean on the invoice?", columns=["InvoiceDate"])
+    assert parsed is None or parsed.get("op") != "strip_time"
+
+
+def test_strip_time_persists_date_only_strings_for_midnight(tmp_path, monkeypatch):
+    import pandas as pd
+
+    from api.services import data_transforms as dx
+    from api.services import upload_store
+
+    monkeypatch.setenv("MARKETMIND_USE_TMP_UPLOADS", "1")
+    monkeypatch.setattr(upload_store, "UPLOAD_TMP_ROOT", tmp_path)
+
+    raw = (
+        "Invoice,StockCode,Description,Quantity,InvoiceDate,Price,Customer ID,Country\n"
+        "1,A,Tea,1,2025-03-13 00:00:00,10,C1,EG\n"
+        "2,B,Coffee,2,2025-04-06 00:00:00,20,C2,EG\n"
+    ).encode()
+    meta = upload_store.create_session("midnight.csv", raw)
+    meta.date_format = "iso"
+    meta.date_format_confirmed = True
+    meta.column_mapping = {
+        "invoice": "Invoice",
+        "stock_code": "StockCode",
+        "description": "Description",
+        "quantity": "Quantity",
+        "invoice_date": "InvoiceDate",
+        "unit_price": "Price",
+        "customer_id": "Customer ID",
+        "country": "Country",
+    }
+    upload_store.save_meta(meta)
+
+    result = dx.preview_or_apply(meta, op="strip_time", confirm_apply=True)
+    assert result.get("ok") is True, result
+    assert result.get("error_code") != "no_time_component"
+
+    path = upload_store.upload_path(meta.session_id)
+    df = pd.read_csv(path)
+    vals = df["InvoiceDate"].astype(str).tolist()
+    assert vals == ["2025-03-13", "2025-04-06"]
+    assert all(":" not in v for v in vals)
+    # Must not claim “already date-only” for midnight datetime columns.
+    preview = dx.preview_or_apply(meta, op="strip_time", confirm_apply=False)
+    # After strip, pure YYYY-MM-DD strings → truly date-only.
+    assert preview.get("error_code") == "no_time_component"
 
 
 def test_parse_intent_ignores_weak_and_picks_threshold_near_comparison():
@@ -440,3 +577,100 @@ def test_refuse_unsafe_out_of_scope():
 
     bad = dx.parse_transform_intent("retrain the model on this file")
     assert bad and bad["op"] == "refuse"
+
+
+def test_format_date_only_honors_dayfirst_and_skips_unconfirmed_slash():
+    from api.services import data_transforms as dx
+
+    # Unconfirmed: never month-first swap into YYYY-MM-DD.
+    assert dx.format_date_only("04/05/2024 00:00:00") == "04/05/2024"
+    assert dx.format_date_only("04/05/2024", date_format=None) == "04/05/2024"
+    # Confirmed day-first: 04/05 → 4 May.
+    assert dx.format_date_only("04/05/2024", date_format="dayfirst") == "2024-05-04"
+    assert dx.format_date_only("04/05/2024", date_format="monthfirst") == "2024-04-05"
+    assert dx.format_date_only("2025-03-13 00:00:00", date_format="iso") == "2025-03-13"
+
+
+def test_fillna_ffill_refuses_identity_columns():
+    import pandas as pd
+
+    from api.services import session_mutate as sm
+
+    df = pd.DataFrame({"Customer ID": ["A", None, "C"], "Quantity": [1, 2, 3]})
+    try:
+        sm._run_step(
+            df,
+            "fillna",
+            {"op": "fillna", "column": "Customer ID", "method": "ffill"},
+            mapping={},
+            protected_drop=None,
+        )
+        assert False, "ffill on customer id must refuse"
+    except sm.SafeExprError as exc:
+        assert "identity" in str(exc).lower() or "invent" in str(exc).lower()
+
+
+def test_hydrate_identical_meta_keeps_local_csv(tmp_path, monkeypatch):
+    """force=True + matching meta must not overwrite a newer local CSV from blob."""
+    from api.services import session_blob
+
+    monkeypatch.setenv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_store_secret")
+    import time
+
+    sid = "hydrate-local-keep"
+    local = tmp_path / sid
+    local.mkdir()
+    now = time.time()
+    meta = {
+        "session_id": sid,
+        "extension": ".csv",
+        "created_at": now,
+        "updated_at": now,
+    }
+    meta_bytes = json.dumps(meta).encode()
+    (local / "meta.json").write_bytes(meta_bytes)
+    (local / "upload.csv").write_text("Invoice\nLOCAL\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        session_blob,
+        "get_bytes",
+        lambda pathname: (
+            meta_bytes
+            if pathname.endswith("meta.json")
+            else b"Invoice\nBLOB\n"
+            if pathname.endswith("upload.csv")
+            else None
+        ),
+    )
+    status = session_blob.hydrate_session_dir(sid, local, force=True, extension=".csv")
+    assert status == "ok"
+    assert (local / "upload.csv").read_text(encoding="utf-8") == "Invoice\nLOCAL\n"
+
+
+def test_yes_with_pending_transform_applies_not_profile(client: TestClient):
+    from api.services import data_transforms as dx
+    from api.services import upload_store
+
+    raw = (
+        "Invoice,StockCode,Description,Quantity,InvoiceDate,Price,Customer ID,Country\n"
+        "1,A,Tea,1,2024-01-15 14:30:00,10,C1,EG\n"
+    ).encode()
+    sid = _sid_with_mapping(client, raw)
+    meta = upload_store.load_meta(sid)
+    # Guided setup still open (profile not confirmed).
+    assert not meta.profile_confirmed
+    preview = dx.preview_or_apply(meta, op="strip_time", confirm_apply=False)
+    assert preview.get("needs_confirm")
+    meta = upload_store.load_meta(sid)
+    assert meta.pending_transform
+
+    confirm = client.post(
+        "/api/upload/assistant",
+        json={"session_id": sid, "question": "yes", "lang": "en"},
+    )
+    assert confirm.status_code == 200, confirm.text
+    body = confirm.json()
+    assert "apply_data_transform" in (body.get("tools_called") or [])
+    assert body.get("data_mutated") is True
+    actions = body.get("actions") or []
+    assert not any(a.get("type") == "confirm_profile" for a in actions)
