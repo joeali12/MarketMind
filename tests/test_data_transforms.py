@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -576,3 +577,100 @@ def test_refuse_unsafe_out_of_scope():
 
     bad = dx.parse_transform_intent("retrain the model on this file")
     assert bad and bad["op"] == "refuse"
+
+
+def test_format_date_only_honors_dayfirst_and_skips_unconfirmed_slash():
+    from api.services import data_transforms as dx
+
+    # Unconfirmed: never month-first swap into YYYY-MM-DD.
+    assert dx.format_date_only("04/05/2024 00:00:00") == "04/05/2024"
+    assert dx.format_date_only("04/05/2024", date_format=None) == "04/05/2024"
+    # Confirmed day-first: 04/05 → 4 May.
+    assert dx.format_date_only("04/05/2024", date_format="dayfirst") == "2024-05-04"
+    assert dx.format_date_only("04/05/2024", date_format="monthfirst") == "2024-04-05"
+    assert dx.format_date_only("2025-03-13 00:00:00", date_format="iso") == "2025-03-13"
+
+
+def test_fillna_ffill_refuses_identity_columns():
+    import pandas as pd
+
+    from api.services import session_mutate as sm
+
+    df = pd.DataFrame({"Customer ID": ["A", None, "C"], "Quantity": [1, 2, 3]})
+    try:
+        sm._run_step(
+            df,
+            "fillna",
+            {"op": "fillna", "column": "Customer ID", "method": "ffill"},
+            mapping={},
+            protected_drop=None,
+        )
+        assert False, "ffill on customer id must refuse"
+    except sm.SafeExprError as exc:
+        assert "identity" in str(exc).lower() or "invent" in str(exc).lower()
+
+
+def test_hydrate_identical_meta_keeps_local_csv(tmp_path, monkeypatch):
+    """force=True + matching meta must not overwrite a newer local CSV from blob."""
+    from api.services import session_blob
+
+    monkeypatch.setenv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_store_secret")
+    import time
+
+    sid = "hydrate-local-keep"
+    local = tmp_path / sid
+    local.mkdir()
+    now = time.time()
+    meta = {
+        "session_id": sid,
+        "extension": ".csv",
+        "created_at": now,
+        "updated_at": now,
+    }
+    meta_bytes = json.dumps(meta).encode()
+    (local / "meta.json").write_bytes(meta_bytes)
+    (local / "upload.csv").write_text("Invoice\nLOCAL\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        session_blob,
+        "get_bytes",
+        lambda pathname: (
+            meta_bytes
+            if pathname.endswith("meta.json")
+            else b"Invoice\nBLOB\n"
+            if pathname.endswith("upload.csv")
+            else None
+        ),
+    )
+    status = session_blob.hydrate_session_dir(sid, local, force=True, extension=".csv")
+    assert status == "ok"
+    assert (local / "upload.csv").read_text(encoding="utf-8") == "Invoice\nLOCAL\n"
+
+
+def test_yes_with_pending_transform_applies_not_profile(client: TestClient):
+    from api.services import data_transforms as dx
+    from api.services import upload_store
+
+    raw = (
+        "Invoice,StockCode,Description,Quantity,InvoiceDate,Price,Customer ID,Country\n"
+        "1,A,Tea,1,2024-01-15 14:30:00,10,C1,EG\n"
+    ).encode()
+    sid = _sid_with_mapping(client, raw)
+    meta = upload_store.load_meta(sid)
+    # Guided setup still open (profile not confirmed).
+    assert not meta.profile_confirmed
+    preview = dx.preview_or_apply(meta, op="strip_time", confirm_apply=False)
+    assert preview.get("needs_confirm")
+    meta = upload_store.load_meta(sid)
+    assert meta.pending_transform
+
+    confirm = client.post(
+        "/api/upload/assistant",
+        json={"session_id": sid, "question": "yes", "lang": "en"},
+    )
+    assert confirm.status_code == 200, confirm.text
+    body = confirm.json()
+    assert "apply_data_transform" in (body.get("tools_called") or [])
+    assert body.get("data_mutated") is True
+    actions = body.get("actions") or []
+    assert not any(a.get("type") == "confirm_profile" for a in actions)

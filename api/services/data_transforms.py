@@ -164,8 +164,13 @@ def _has_time_component(series: pd.Series) -> tuple[bool, int]:
     return count > 0, count
 
 
-def format_date_only(value: object) -> str | None:
-    """Serialize a date/datetime for UI as YYYY-MM-DD (never ``… 00:00:00``)."""
+def format_date_only(value: object, date_format: str | None = None) -> str | None:
+    """Serialize a date/datetime for UI as YYYY-MM-DD (never ``… 00:00:00``).
+
+    Honors session ``date_format`` (dayfirst/monthfirst/iso). Unconfirmed slash
+    dates are left as calendar text after stripping any clock — never month-first
+    reinterpreted into a swapped YYYY-MM-DD.
+    """
     if value is None:
         return None
     try:
@@ -173,12 +178,21 @@ def format_date_only(value: object) -> str | None:
             return None
     except (TypeError, ValueError):
         return None
-    parsed = pd.to_datetime(value, errors="coerce")
-    if pd.notna(parsed):
-        return pd.Timestamp(parsed).strftime("%Y-%m-%d")
+    # Already a calendar/datetime object — formatting cannot swap day/month.
+    if isinstance(value, pd.Timestamp):
+        return value.strftime("%Y-%m-%d")
+    if hasattr(value, "strftime") and not isinstance(value, str):
+        try:
+            return pd.Timestamp(value).strftime("%Y-%m-%d")
+        except (TypeError, ValueError, OverflowError):
+            pass
     text = _value_str(value).strip()
     if not text or text.lower() in {"nat", "none", "nan"}:
         return None
+    parsed = _parse_datetimes(pd.Series([value]), date_format).iloc[0]
+    if pd.notna(parsed):
+        return pd.Timestamp(parsed).strftime("%Y-%m-%d")
+    # Ambiguous / unparsed: strip clock only; do not invent an ISO order.
     return _CLOCK_RE.sub("", text).strip() or text
 
 

@@ -231,20 +231,26 @@ def hydrate_session_dir(
     directory.mkdir(parents=True, exist_ok=True)
     meta_path = directory / "meta.json"
     refresh = force or not meta_path.exists()
-    if meta_path.exists() and meta_path.read_bytes() != meta_bytes:
-        try:
-            local_obj = json.loads(meta_path.read_text())
-            local_u = float(
-                local_obj.get("updated_at") or local_obj.get("created_at") or 0
-            )
-            blob_u = float(
-                meta_obj.get("updated_at") or meta_obj.get("created_at") or 0
-            )
-            # Prefer the newer copy so a just-written pending_transform is not
-            # clobbered by a slightly stale blob read on the same isolate.
-            refresh = blob_u > local_u
-        except (json.JSONDecodeError, TypeError, ValueError):
-            refresh = True
+    if meta_path.exists():
+        local_bytes = meta_path.read_bytes()
+        if local_bytes == meta_bytes:
+            # Identical meta: keep local CSVs. force=True must not pull blob files
+            # that may lag a just-written (not-yet-mirrored) upload/transform.
+            refresh = False
+        else:
+            try:
+                local_obj = json.loads(local_bytes.decode("utf-8"))
+                local_u = float(
+                    local_obj.get("updated_at") or local_obj.get("created_at") or 0
+                )
+                blob_u = float(
+                    meta_obj.get("updated_at") or meta_obj.get("created_at") or 0
+                )
+                # Prefer the newer copy so a just-written pending_transform is not
+                # clobbered by a slightly stale blob read on the same isolate.
+                refresh = blob_u > local_u
+            except (json.JSONDecodeError, TypeError, ValueError, UnicodeDecodeError):
+                refresh = True
     if refresh:
         meta_path.write_bytes(meta_bytes)
 

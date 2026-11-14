@@ -73,7 +73,10 @@ export function UnresolvedGapsPanel({
       for (const field of EDIT_FIELDS) {
         const key = `${r.row_index}:${field}`;
         const cur = r[field];
-        if (cur != null) next[key] = String(cur);
+        if (cur == null) continue;
+        // Dates: calendar-only seed — never stash ``… 00:00:00`` into save drafts.
+        next[key] =
+          field === "invoice_date" ? formatGapDate(String(cur)) : String(cur);
       }
     }
     setDrafts((prev) => ({ ...next, ...prev }));

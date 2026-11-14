@@ -996,11 +996,33 @@ def answer(
         quick = ["yes correct" if not ar else "صح كده", "not correct" if not ar else "مش صح"]
         actions.append({"type": "await", "field": "profile_confirm"})
 
-    # --- Confirm file summary ---
-    elif re.search(
-        r"\byes\b|correct|صح|أيوه|ايوه|تمام كده|صح كده|yes correct|looks good|موافق",
-        q_low,
-    ) and not profile.get("profile_confirmed"):
+    # --- Confirm file summary (pending transform apply wins over profile yes) ---
+    elif (
+        re.search(
+            r"\byes\b|correct|صح|أيوه|ايوه|تمام كده|صح كده|yes correct|looks good|موافق",
+            q_low,
+        )
+        and not profile.get("profile_confirmed")
+        and not (
+            getattr(meta, "pending_transform", None)
+            and (q or "").strip().lower()
+            in {
+                "yes",
+                "ok",
+                "موافق",
+                "أيوه",
+                "ايوه",
+                "تمام",
+                "apply",
+                "do it",
+                "confirm",
+                "طبّق",
+                "طبق",
+                "نفّذ",
+                "نفذ",
+            }
+        )
+    ):
         actions.append({"type": "confirm_profile", "confirmed": True})
         unresolved_n = len((proposals or {}).get("unresolved_preview") or [])
         if unresolved_n == 0:

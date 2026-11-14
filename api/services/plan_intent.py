@@ -214,6 +214,14 @@ def _sanitize_plan(
                 resolved = resolve_col(item.get(key))
                 if resolved:
                     item[key] = resolved
+        # Drop fillna on identity-like columns (value or ffill/bfill invents IDs).
+        if sop == "fillna":
+            col_name = str(item.get("column") or "").lower()
+            if any(
+                k in col_name
+                for k in ("customer", "invoice", "email", "phone", "زبون", "فاتور")
+            ):
+                continue
         cleaned.append(item)
     if not cleaned:
         return None

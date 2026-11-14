@@ -467,10 +467,9 @@ def _run_step(
         col = resolve_column(df, step.get("column"))
         if not col:
             raise SafeExprError("fillna: column not found")
-        # Refuse inventing IDs
+        # Refuse inventing IDs — value fill AND ffill/bfill (propagation invents too).
         if any(k in _norm(col) for k in ("customer", "invoice", "email", "phone", "زبون", "فاتور")):
-            if step.get("value") not in (None, "", 0, "0"):
-                raise SafeExprError("Cannot invent values for identity-like columns")
+            raise SafeExprError("Cannot invent values for identity-like columns")
         out = df.copy()
         method = str(step.get("method") or "").lower()
         if method == "ffill":
