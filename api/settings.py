@@ -20,7 +20,15 @@ ALLOWED_UPLOAD_EXTENSIONS: frozenset[str] = frozenset({".csv", ".xlsx"})
 MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024  # 25 MB
 MAX_PREVIEW_ROWS: int = 100_000
 UPLOAD_TTL_SECONDS: int = 2 * 60 * 60  # 2 hours
-UPLOAD_TMP_ROOT: Path = PROJECT_ROOT / "data" / "uploads" / "tmp"
+# On Vercel / read-only images, use /tmp (override with UPLOAD_TMP_ROOT).
+UPLOAD_TMP_ROOT: Path = Path(
+    os.environ.get(
+        "UPLOAD_TMP_ROOT",
+        "/tmp/marketmind-uploads"
+        if os.environ.get("VERCEL") or os.environ.get("MARKETMIND_USE_TMP_UPLOADS") == "1"
+        else str(PROJECT_ROOT / "data" / "uploads" / "tmp"),
+    )
+)
 
 DEMO_BADGE_EN = "Sample UK retail dataset (GBP) — not your live shop."
 DEMO_BADGE_AR = "بيانات تجريبية من متجر بريطاني تاريخي (جنيه إسترليني) — مش متجرك الحقيقي."

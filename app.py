@@ -86,6 +86,21 @@ from app_pages.ui import (  # noqa: E402
 apply_lang_query()
 inject_direction_and_motion()
 
+# PDF / academic Cloud app only — not the Next.js product UI.
+_product = __import__("os").environ.get("MARKETMIND_PRODUCT_URL", "https://marketmind-web-ochre.vercel.app").strip()
+_banner_en = (
+    f"Academic Streamlit app (course PDF). Product UI: {_product}"
+    if _product
+    else "Academic Streamlit app for the course PDF — not the Next.js product UI (web/ + api/)."
+)
+_banner_ar = (
+    f"تطبيق Streamlit الأكاديمي (ملف المقرر). واجهة المنتج: {_product}"
+    if _product
+    else "تطبيق Streamlit الأكاديمي لملف المقرر — مش واجهة Next.js للمنتج (web/ + api/)."
+)
+st.info(_banner_ar if st.query_params.get("lang") == "ar" else _banner_en)
+
+
 store = st.Page("app_pages/home.py", title=t("nav.home"), icon=":material/dashboard:", default=True)
 upload = st.Page("app_pages/data_validation.py", title=t("nav.validation"), icon=":material/upload_file:")
 overview = st.Page("app_pages/overview.py", title=t("nav.overview"), icon=":material/summarize:")

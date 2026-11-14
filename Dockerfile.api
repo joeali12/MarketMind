@@ -1,0 +1,29 @@
+# MarketMind FastAPI (product API for Next.js). Not the Streamlit PDF app.
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+# Product API does not need Streamlit/Playwright/Jupyter at runtime.
+RUN pip install --no-cache-dir \
+    pandas==3.1.1 numpy==2.5.4 scikit-learn==1.9.1 joblib==1.6.0 \
+    openpyxl==3.1.5 xlrd==2.0.2 pyarrow==26.0.1 PyYAML==6.0.3 \
+    fastapi==0.162.2 uvicorn==0.54.0 python-multipart==0.0.20 \
+    httpx==0.28.1 pydantic==2.14.3 google-genai==3.0.0 python-dotenv==1.2.4
+
+COPY api ./api
+COPY src ./src
+COPY artifacts ./artifacts
+COPY reports ./reports
+COPY data/processed ./data/processed
+COPY static ./static
+
+ENV PYTHONPATH=/app/src:/app
+ENV PORT=8000
+EXPOSE 8000
+
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

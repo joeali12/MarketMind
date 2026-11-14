@@ -58,13 +58,20 @@ Synthetic fixtures test **behavior only** — not model quality.
 
 **Manual mapping still required** for unrecognized headers and ambiguous Amount/Total. Missing customer ID, date, invoice, or category disables only dependent metrics (explained in UI). Multiple currencies are never summed or FX-converted; pick one analysis currency. Rows with a blank or unknown currency stay out of that total, and the screen shows how many were excluded and why.
 
-## Streamlit Community Cloud (academic app)
+## Public product (Next.js + FastAPI)
 
-**Live:** https://marketmind-grad.streamlit.app/
+**Live product UI:** https://marketmind-web-ochre.vercel.app/  
+**API:** https://marketmind-api-phi.vercel.app/ (`GET /api/meta`)
 
-Deployed from `joeali12/MarketMind` · `main` · `app.py` · Python 3.12 · no secrets. Anonymous access works (`viewerAuthEnabled=false`). LinkedIn/CV drafts stay unpublished.
+This is the real upload → mapping → cleaning → store analytics product (`web/` + `api/`).
 
-The Cloud app reads committed artifacts and the small derived parquet files in `docs/deployment.md`. It does not need `data/raw/online_retail_II.xlsx`.
+## Streamlit Community Cloud (academic PDF only)
+
+**Live (course PDF shell):** https://marketmind-grad.streamlit.app/
+
+Streamlit serves the academic multipage app (`app_pages/*`) required by the project PDF (segments, CLV, model quality). It is **not** the Next.js product UI. Optional Stitch HTML (`?stitch=1`) is a static export only.
+
+Deployed from `joeali12/MarketMind` · `main` · `app.py` · Python 3.12 · no secrets.
 
 ## Screenshots (current product UI)
 
@@ -175,7 +182,7 @@ Units: **eligible positive spend** over 90 days in **GBP (£)** (UCI dataset des
 - High zero-target rates in the academic 90-day window
 - Target is eligible positive spend (D5), not net revenue after refunds
 - Currency GBP (£) for demo from UCI description; uploads never assume EGP/GBP/USD from filename
-- Not a commercial multi-tenant SaaS; Streamlit Cloud academic app is published at https://marketmind-grad.streamlit.app/ (D8 Streamlit approved; LinkedIn still unpublished)
+- Not a commercial multi-tenant SaaS; product UI on Vercel + API; Streamlit Cloud is PDF-only at https://marketmind-grad.streamlit.app/ (LinkedIn still unpublished)
 
 ## Docs
 
